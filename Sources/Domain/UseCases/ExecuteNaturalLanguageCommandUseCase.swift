@@ -76,7 +76,22 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
 
                 switch safetyLevel {
                 case .safe:
-                    let result = try await tool.execute(arguments: arguments, sshClient: sshClient)
+                    let result: ToolExecutionResult
+                    do {
+                        result = try await tool.execute(arguments: arguments, sshClient: sshClient)
+                    } catch {
+                        print("[Tool] \(toolCall.toolName) execution error: \(error)")
+                        let errorOutput = "ERROR: \(error.localizedDescription)"
+                        let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput)
+                        newMessages.append(errorMsg)
+                        history.append(errorMsg)
+                        onIntermediateMessage?(errorMsg)
+
+                        response = try await aiService.sendToolResult(
+                            errorOutput, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
+                        )
+                        continue
+                    }
                     let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output)
                     newMessages.append(cmdMsg)
                     history.append(cmdMsg)
@@ -90,7 +105,22 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                     let approval = await onToolCallNeedsConfirmation?(toolCall) ?? .denied
 
                     if approval == .approved {
-                        let result = try await tool.execute(arguments: arguments, sshClient: sshClient)
+                        let result: ToolExecutionResult
+                        do {
+                            result = try await tool.execute(arguments: arguments, sshClient: sshClient)
+                        } catch {
+                            print("[Tool] \(toolCall.toolName) execution error: \(error)")
+                            let errorOutput = "ERROR: \(error.localizedDescription)"
+                            let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput)
+                            newMessages.append(errorMsg)
+                            history.append(errorMsg)
+                            onIntermediateMessage?(errorMsg)
+
+                            response = try await aiService.sendToolResult(
+                                errorOutput, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
+                            )
+                            continue
+                        }
                         let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output)
                         newMessages.append(cmdMsg)
                         history.append(cmdMsg)

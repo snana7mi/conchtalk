@@ -64,9 +64,45 @@ actor NIOSSHClient: SSHClientProtocol {
         }
 
         do {
-            let output = try await client.executeCommand(command)
-            return String(data: Data(buffer: output), encoding: .utf8) ?? ""
+            let stream = try await client.executeCommandStream(command)
+            var stdout = ByteBuffer()
+            var stderr = ByteBuffer()
+
+            for try await chunk in stream {
+                switch chunk {
+                case .stdout(var buffer):
+                    stdout.writeBuffer(&buffer)
+                case .stderr(var buffer):
+                    stderr.writeBuffer(&buffer)
+                }
+            }
+
+            let stdoutStr = String(data: Data(buffer: stdout), encoding: .utf8) ?? ""
+            let stderrStr = String(data: Data(buffer: stderr), encoding: .utf8) ?? ""
+
+            if !stderrStr.isEmpty {
+                print("[SSH stderr] \(command): \(stderrStr)")
+            }
+
+            // Merge stdout and stderr — stderr is informational, not a fatal error
+            if stdoutStr.isEmpty && !stderrStr.isEmpty {
+                return stderrStr
+            } else if !stderrStr.isEmpty {
+                return stdoutStr + "\n[stderr]\n" + stderrStr
+            }
+            return stdoutStr
+        } catch is TTYSTDError {
+            // TTYSTDError means stderr had content — not a connection failure
+            // This shouldn't happen with executeCommandStream, but handle as fallback
+            print("[SSH] TTYSTDError for command: \(command)")
+            throw SSHError.commandFailed("Command produced error output")
+        } catch let error as SSHClient.CommandFailed {
+            // Non-zero exit code — command failed but connection is fine
+            print("[SSH] Command failed (exit \(error.exitCode)): \(command)")
+            throw SSHError.commandFailed("Exit code: \(error.exitCode)")
         } catch {
+            // Real connection-level error — disconnect
+            print("[SSH] Connection error: \(error)")
             self._isConnected = false
             self.client = nil
             throw SSHError.commandFailed(error.localizedDescription)

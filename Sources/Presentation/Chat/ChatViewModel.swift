@@ -144,6 +144,7 @@ final class ChatViewModel {
             }
 
         } catch {
+            print("[ChatVM] Error: \(error)")
             messages.removeAll { $0.isLoading }
             let errorMsg = Message(role: .system, content: String(localized: "Error: \(error.localizedDescription)"))
             messages.append(errorMsg)
