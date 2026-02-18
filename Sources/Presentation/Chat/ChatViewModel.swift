@@ -8,7 +8,7 @@ final class ChatViewModel {
     var isProcessing: Bool = false
     var isConnected: Bool = false
     var error: String?
-    var pendingCommand: SSHCommand?
+    var pendingToolCall: ToolCall?
     var showConfirmation: Bool = false
 
     private var server: Server
@@ -16,18 +16,18 @@ final class ChatViewModel {
     private let store: SwiftDataStore
     private let sshManager: SSHSessionManager
     private let aiService: AIServiceProtocol
-    private let safetyValidator: CommandSafetyValidator
+    private let toolRegistry: ToolRegistryProtocol
     private let keychainService: KeychainServiceProtocol
 
     private var commandContinuation: CheckedContinuation<ExecuteNaturalLanguageCommandUseCase.CommandApproval, Never>?
 
-    init(server: Server, conversationID: UUID? = nil, store: SwiftDataStore, sshManager: SSHSessionManager, aiService: AIServiceProtocol, keychainService: KeychainServiceProtocol) {
+    init(server: Server, conversationID: UUID? = nil, store: SwiftDataStore, sshManager: SSHSessionManager, aiService: AIServiceProtocol, toolRegistry: ToolRegistryProtocol, keychainService: KeychainServiceProtocol) {
         self.server = server
         self.conversationID = conversationID ?? UUID()
         self.store = store
         self.sshManager = sshManager
         self.aiService = aiService
-        self.safetyValidator = CommandSafetyValidator()
+        self.toolRegistry = toolRegistry
         self.keychainService = keychainService
     }
 
@@ -104,14 +104,14 @@ final class ChatViewModel {
             let useCase = ExecuteNaturalLanguageCommandUseCase(
                 aiService: aiService,
                 sshClient: sshClient,
-                safetyValidator: safetyValidator
+                toolRegistry: toolRegistry
             )
 
             let serverContext = "Host: \(server.host), User: \(server.username), OS: Linux"
 
-            useCase.onCommandNeedsConfirmation = { [weak self] command in
+            useCase.onToolCallNeedsConfirmation = { [weak self] toolCall in
                 guard let self else { return .denied }
-                return await self.requestConfirmation(for: command)
+                return await self.requestConfirmation(for: toolCall)
             }
 
             useCase.onIntermediateMessage = { [weak self] message in
@@ -153,8 +153,8 @@ final class ChatViewModel {
         isProcessing = false
     }
 
-    private func requestConfirmation(for command: SSHCommand) async -> ExecuteNaturalLanguageCommandUseCase.CommandApproval {
-        pendingCommand = command
+    private func requestConfirmation(for toolCall: ToolCall) async -> ExecuteNaturalLanguageCommandUseCase.CommandApproval {
+        pendingToolCall = toolCall
         showConfirmation = true
 
         return await withCheckedContinuation { continuation in
@@ -164,14 +164,14 @@ final class ChatViewModel {
 
     func approveCommand() {
         showConfirmation = false
-        pendingCommand = nil
+        pendingToolCall = nil
         commandContinuation?.resume(returning: .approved)
         commandContinuation = nil
     }
 
     func denyCommand() {
         showConfirmation = false
-        pendingCommand = nil
+        pendingToolCall = nil
         commandContinuation?.resume(returning: .denied)
         commandContinuation = nil
     }

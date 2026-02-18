@@ -5,24 +5,24 @@ nonisolated struct Message: Identifiable, Sendable {
     var role: MessageRole
     var content: String
     var timestamp: Date
-    var command: SSHCommand?    // Non-nil for command-type messages
-    var commandOutput: String?  // Raw output from SSH execution
+    var toolCall: ToolCall?     // Non-nil for tool-call messages
+    var toolOutput: String?     // Raw output from tool execution
     var isLoading: Bool
 
     enum MessageRole: String, Codable, Sendable {
         case user
         case assistant
-        case command
+        case command       // Kept as "command" for backward compat with persisted roleRaw
         case system
     }
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), command: SSHCommand? = nil, commandOutput: String? = nil, isLoading: Bool = false) {
+    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCall: ToolCall? = nil, toolOutput: String? = nil, isLoading: Bool = false) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
-        self.command = command
-        self.commandOutput = commandOutput
+        self.toolCall = toolCall
+        self.toolOutput = toolOutput
         self.isLoading = isLoading
     }
 }

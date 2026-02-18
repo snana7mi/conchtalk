@@ -58,17 +58,38 @@ struct ChatView: View {
                 }
             }
         }
-        .alert("Confirm Command", isPresented: $viewModel.showConfirmation) {
+        .alert("Confirm Action", isPresented: $viewModel.showConfirmation) {
             Button("Execute", role: .destructive) { viewModel.approveCommand() }
             Button("Cancel", role: .cancel) { viewModel.denyCommand() }
         } message: {
-            if let cmd = viewModel.pendingCommand {
-                Text("\(cmd.explanation)\n\n$ \(cmd.command)")
+            if let toolCall = viewModel.pendingToolCall {
+                Text(confirmationMessage(for: toolCall))
             }
         }
         .task {
             await viewModel.loadMessages()
             await viewModel.connect()
+        }
+    }
+
+    private func confirmationMessage(for toolCall: ToolCall) -> String {
+        let args = try? toolCall.decodedArguments()
+
+        switch toolCall.toolName {
+        case "execute_ssh_command":
+            let cmd = args?["command"] as? String ?? ""
+            return "\(toolCall.explanation)\n\n$ \(cmd)"
+        case "write_file":
+            let path = args?["path"] as? String ?? ""
+            let append = args?["append"] as? Bool ?? false
+            let action = append ? "Append to" : "Write to"
+            return "\(toolCall.explanation)\n\n\(action): \(path)"
+        case "manage_service":
+            let service = args?["service"] as? String ?? ""
+            let action = args?["action"] as? String ?? ""
+            return "\(toolCall.explanation)\n\nsystemctl \(action) \(service)"
+        default:
+            return toolCall.explanation
         }
     }
 }

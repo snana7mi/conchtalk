@@ -8,6 +8,7 @@ final class DependencyContainer {
     let sshManager: SSHSessionManager
     let keychainService: KeychainService
     let aiService: AIProxyService
+    let toolRegistry: ToolRegistry
 
     init() {
         // SwiftData
@@ -30,10 +31,22 @@ final class DependencyContainer {
 
         self.store = SwiftDataStore(modelContainer: modelContainer)
 
+        // Tool Registry
+        self.toolRegistry = ToolRegistry(tools: [
+            ExecuteSSHCommandTool(),
+            ReadFileTool(),
+            WriteFileTool(),
+            ListDirectoryTool(),
+            GetSystemInfoTool(),
+            GetProcessListTool(),
+            GetNetworkStatusTool(),
+            ManageServiceTool(),
+        ])
+
         // Services
         self.sshManager = SSHSessionManager()
         self.keychainService = KeychainService()
-        self.aiService = AIProxyService(keychainService: keychainService)
+        self.aiService = AIProxyService(keychainService: keychainService, toolRegistry: toolRegistry)
     }
 
     func makeChatViewModel(for server: Server, conversationID: UUID? = nil) -> ChatViewModel {
@@ -43,6 +56,7 @@ final class DependencyContainer {
             store: store,
             sshManager: sshManager,
             aiService: aiService,
+            toolRegistry: toolRegistry,
             keychainService: keychainService
         )
     }

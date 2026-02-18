@@ -13,11 +13,11 @@ struct CommandDetailView: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "terminal")
+                    Image(systemName: iconName)
                         .foregroundStyle(statusColor)
                         .font(.caption)
 
-                    Text(message.command?.explanation ?? message.content)
+                    Text(message.toolCall?.explanation ?? message.content)
                         .font(.callout)
                         .foregroundStyle(.primary)
                         .lineLimit(isExpanded ? nil : 1)
@@ -33,23 +33,13 @@ struct CommandDetailView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                // Command line
-                if let cmd = message.command {
-                    HStack {
-                        Text("$")
-                            .foregroundStyle(.secondary)
-                        Text(cmd.command)
-                            .textSelection(.enabled)
-                    }
-                    .font(Theme.commandFont)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                // Detail line (varies by tool type)
+                if let toolCall = message.toolCall {
+                    detailView(for: toolCall)
                 }
 
                 // Output
-                if let output = message.commandOutput, !output.isEmpty {
+                if let output = message.toolOutput, !output.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(output)
                             .font(Theme.commandFont)
@@ -68,10 +58,128 @@ struct CommandDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleCornerRadius))
     }
 
-    private var statusColor: Color {
-        if let cmd = message.command {
-            return cmd.isDestructive ? .orange : .green
+    @ViewBuilder
+    private func detailView(for toolCall: ToolCall) -> some View {
+        let args = try? toolCall.decodedArguments()
+
+        switch toolCall.toolName {
+        case "execute_ssh_command":
+            if let command = args?["command"] as? String {
+                HStack {
+                    Text("$")
+                        .foregroundStyle(.secondary)
+                    Text(command)
+                        .textSelection(.enabled)
+                }
+                .font(Theme.commandFont)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+        case "read_file", "write_file":
+            if let path = args?["path"] as? String {
+                Label(path, systemImage: "doc.text")
+                    .font(Theme.commandFont)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+        case "list_directory":
+            if let path = args?["path"] as? String {
+                Label(path, systemImage: "folder")
+                    .font(Theme.commandFont)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+        case "manage_service":
+            if let service = args?["service"] as? String,
+               let action = args?["action"] as? String {
+                Label("systemctl \(action) \(service)", systemImage: "gearshape.2")
+                    .font(Theme.commandFont)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+        case "get_system_info":
+            let category = args?["category"] as? String ?? "all"
+            Label("System Info: \(category)", systemImage: "cpu")
+                .font(Theme.commandFont)
+                .foregroundStyle(.secondary)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        case "get_process_list":
+            let filter = args?["filter"] as? String
+            Label(filter != nil ? "Processes: \(filter!)" : "Process List", systemImage: "list.bullet.rectangle")
+                .font(Theme.commandFont)
+                .foregroundStyle(.secondary)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        case "get_network_status":
+            let category = args?["category"] as? String ?? "all"
+            Label("Network: \(category)", systemImage: "network")
+                .font(Theme.commandFont)
+                .foregroundStyle(.secondary)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        default:
+            Text(toolCall.toolName)
+                .font(Theme.commandFont)
+                .foregroundStyle(.secondary)
+                .padding(8)
         }
-        return .blue
+    }
+
+    private var iconName: String {
+        guard let toolName = message.toolCall?.toolName else { return "terminal" }
+        switch toolName {
+        case "execute_ssh_command": return "terminal"
+        case "read_file": return "doc.text"
+        case "write_file": return "doc.text.fill"
+        case "list_directory": return "folder"
+        case "get_system_info": return "cpu"
+        case "get_process_list": return "list.bullet.rectangle"
+        case "get_network_status": return "network"
+        case "manage_service": return "gearshape.2"
+        default: return "wrench"
+        }
+    }
+
+    private var statusColor: Color {
+        guard let toolCall = message.toolCall else { return .blue }
+        let args = try? toolCall.decodedArguments()
+
+        switch toolCall.toolName {
+        case "execute_ssh_command":
+            let isDestructive = args?["is_destructive"] as? Bool ?? false
+            return isDestructive ? .orange : .green
+        case "write_file":
+            return .orange
+        case "manage_service":
+            let action = args?["action"] as? String ?? ""
+            return ["start", "stop", "restart", "enable", "disable"].contains(action) ? .orange : .green
+        default:
+            return .green
+        }
     }
 }

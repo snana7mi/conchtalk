@@ -3,12 +3,14 @@ import Foundation
 final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     private let session: URLSession
     private let keychainService: KeychainServiceProtocol
+    private let toolRegistry: ToolRegistryProtocol
 
-    init(keychainService: KeychainServiceProtocol) {
+    init(keychainService: KeychainServiceProtocol, toolRegistry: ToolRegistryProtocol) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120
         self.session = URLSession(configuration: config)
         self.keychainService = keychainService
+        self.toolRegistry = toolRegistry
     }
 
     // MARK: - AIServiceProtocol
@@ -19,7 +21,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         return try await callOpenAI(messages: messages)
     }
 
-    func sendCommandResult(_ result: String, forCommand command: SSHCommand, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
+    func sendToolResult(_ result: String, forToolCall toolCall: ToolCall, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
         let messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
         return try await callOpenAI(messages: messages)
     }
@@ -43,7 +45,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         let body: [String: Any] = [
             "model": settings.modelName,
             "messages": messages,
-            "tools": [Self.toolDefinition],
+            "tools": toolRegistry.openAIToolDefinitions(),
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -65,16 +67,31 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
             throw AIServiceError.invalidResponse
         }
 
-        // Check for tool calls
+        // Check for tool calls (generic — works for any registered tool)
         if let toolCalls = message["tool_calls"] as? [[String: Any]],
-           let toolCall = toolCalls.first,
-           let function = toolCall["function"] as? [String: Any],
+           let firstToolCall = toolCalls.first,
+           let toolCallID = firstToolCall["id"] as? String,
+           let function = firstToolCall["function"] as? [String: Any],
            let name = function["name"] as? String,
-           name == "execute_ssh_command",
-           let arguments = function["arguments"] as? String,
-           let argData = arguments.data(using: .utf8) {
-            let cmd = try JSONDecoder().decode(SSHCommand.self, from: argData)
-            return .command(cmd)
+           let argumentsString = function["arguments"] as? String,
+           let argData = argumentsString.data(using: .utf8) {
+
+            // Extract explanation from arguments if present, otherwise use tool name
+            let explanation: String
+            if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
+               let expl = args["explanation"] as? String {
+                explanation = expl
+            } else {
+                explanation = name
+            }
+
+            let toolCall = ToolCall(
+                id: toolCallID,
+                toolName: name,
+                argumentsJSON: argData,
+                explanation: explanation
+            )
+            return .toolCall(toolCall)
         }
 
         // Text response
@@ -90,10 +107,9 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         // System prompt
         openAIMessages.append([
             "role": "system",
-            "content": Self.systemPrompt(serverContext: serverContext),
+            "content": Self.systemPrompt(serverContext: serverContext, tools: toolRegistry.tools),
         ])
 
-        var toolCallCounter = 0
         for msg in history where !msg.isLoading {
             switch msg.role {
             case .user:
@@ -101,11 +117,8 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
             case .assistant:
                 openAIMessages.append(["role": "assistant", "content": msg.content])
             case .command:
-                if let cmd = msg.command {
-                    toolCallCounter += 1
-                    let toolCallID = "call_\(toolCallCounter)"
-                    let argsJSON = try? JSONEncoder().encode(cmd)
-                    let argsString = argsJSON.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                if let toolCall = msg.toolCall {
+                    let argsString = String(data: toolCall.argumentsJSON, encoding: .utf8) ?? "{}"
 
                     // Assistant message with tool call
                     openAIMessages.append([
@@ -113,10 +126,10 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                         "content": NSNull(),
                         "tool_calls": [
                             [
-                                "id": toolCallID,
+                                "id": toolCall.id,
                                 "type": "function",
                                 "function": [
-                                    "name": "execute_ssh_command",
+                                    "name": toolCall.toolName,
                                     "arguments": argsString,
                                 ] as [String: Any],
                             ] as [String: Any],
@@ -126,8 +139,8 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                     // Tool response
                     openAIMessages.append([
                         "role": "tool",
-                        "tool_call_id": toolCallID,
-                        "content": msg.commandOutput ?? "",
+                        "tool_call_id": toolCall.id,
+                        "content": msg.toolOutput ?? "",
                     ])
                 }
             case .system:
@@ -140,64 +153,38 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
     // MARK: - System Prompt
 
-    private static func systemPrompt(serverContext: String) -> String {
-        """
-        You are ConchTalk (海螺对话), an intelligent SSH assistant. You help users manage remote servers through natural language conversations.
+    private static func systemPrompt(serverContext: String, tools: [ToolProtocol]) -> String {
+        let toolList = tools.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
+
+        return """
+        You are ConchTalk, an intelligent SSH assistant. You help users manage remote servers through natural language conversations.
 
         ## Your Role
-        - Translate user requests into SSH commands
-        - Execute commands step by step, analyzing results before proceeding
+        - Translate user requests into tool calls to manage the remote server
+        - Execute tools step by step, analyzing results before proceeding
         - Provide clear explanations in the user's language (Chinese or English, match the user)
         - When a task requires multiple steps, execute them one at a time
 
         ## Server Context
         \(serverContext)
 
-        ## Rules
-        1. Use the execute_ssh_command tool to run commands on the server
-        2. For read-only operations (ls, cat, ps, df, etc.), set is_destructive to false
-        3. For write/modify operations (rm, mv, apt install, service restart, etc.), set is_destructive to true
-        4. Never execute obviously dangerous commands like "rm -rf /", "mkfs", "dd if=/dev/zero" etc.
-        5. Always explain what each command does
-        6. After executing a command, analyze the output and decide the next step
-        7. When the task is complete, provide a summary in natural language (not a tool call)
-        8. If a command fails, explain the error and suggest alternatives
-        9. Keep explanations concise but informative
+        ## Available Tools
+        \(toolList)
 
-        ## Response Format
-        - When you need to execute a command: use the execute_ssh_command tool
-        - When you want to communicate with the user: respond with plain text
-        - Always match the user's language (if they write in Chinese, respond in Chinese)
+        ## Rules
+        1. Use the appropriate tool for each task
+        2. For read-only operations, prefer specialized tools (read_file, list_directory, get_system_info, etc.)
+        3. Use execute_ssh_command as a general-purpose fallback when no specialized tool fits
+        4. For execute_ssh_command: set is_destructive to false for read-only commands, true for write/modify operations
+        5. Never execute obviously dangerous commands like "rm -rf /", "mkfs", "dd if=/dev/zero" etc.
+        6. Always provide a clear explanation of what each tool call does
+        7. After executing a tool, analyze the output and decide the next step
+        8. When the task is complete, provide a summary in natural language (not a tool call)
+        9. If a tool call fails, explain the error and suggest alternatives
+        10. Keep explanations concise but informative
+        11. Always match the user's language (if they write in Chinese, respond in Chinese)
         """
     }
-
-    // MARK: - Tool Definition
-
-    private static let toolDefinition: [String: Any] = [
-        "type": "function",
-        "function": [
-            "name": "execute_ssh_command",
-            "description": "Execute an SSH command on the remote server. Use this to run commands that help accomplish the user's task.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "command": [
-                        "type": "string",
-                        "description": "The shell command to execute on the remote server",
-                    ] as [String: String],
-                    "explanation": [
-                        "type": "string",
-                        "description": "A brief explanation of what this command does, in the user's language",
-                    ] as [String: String],
-                    "is_destructive": [
-                        "type": "boolean",
-                        "description": "Whether this command modifies server state (write/delete/restart operations). Read-only commands like ls, cat, ps should be false.",
-                    ] as [String: String],
-                ] as [String: [String: String]],
-                "required": ["command", "explanation", "is_destructive"],
-            ] as [String: Any],
-        ] as [String: Any],
-    ]
 }
 
 // MARK: - AI Settings (stored in UserDefaults + Keychain)
