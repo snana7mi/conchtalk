@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+
+# Swift Package Manager
+.build/
+Packages/
+*.resolved
+
+# Go
+conchtalk-server/server
+conchtalk-server/conchtalk-server
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/
+.serena/
