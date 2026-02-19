@@ -78,6 +78,9 @@ enum ContextWindowManager {
             if let output = msg.toolOutput {
                 tokens += estimateTokens(for: output)
             }
+            if let reasoning = msg.reasoningContent {
+                tokens += estimateTokens(for: reasoning)
+            }
         }
 
         return Double(tokens) / Double(maxTokens)

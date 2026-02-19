@@ -20,7 +20,7 @@
 └─────────────┘
 ```
 
-客户端直连 AI API，无需后端代理。核心是一个 **AI Agent Loop**，AI 可以自主选择工具并连续执行多步操作，直到任务完成。
+客户端直连 AI API，无需后端代理。核心是一个 **AI Agent Loop**，AI 可以自主选择工具并连续执行多步操作，直到任务完成。支持 **SSE 流式输出**，推理模型的思维链实时展示。
 
 ## 多工具体系
 
@@ -69,7 +69,8 @@
 
 - **AI 自主决策** — 每轮循环中 AI 根据上一步的输出决定下一步：继续执行、换一个工具、或总结回复用户
 - **工具自治** — 每个工具自带参数 schema、安全校验逻辑和执行逻辑，核心编排器无需了解具体工具
-- **流式中间结果** — 通过 `onIntermediateMessage` 回调，每执行一个工具立即推送到 UI，用户实时可见
+- **流式输出** — 通过 SSE (Server-Sent Events) 实时接收 AI 响应，推理过程和回复内容逐字呈现
+- **思维链展示** — 支持 DeepSeek R1、OpenAI o1/o3 等推理模型的 `reasoning_content`，实时展开显示 AI 思考过程，完成后自动折叠
 - **用户介入点** — 写操作触发确认弹框，用户拒绝后 AI 收到 `DENIED` 反馈并调整策略
 - **安全边界** — 危险命令被拦截后 AI 收到 `BLOCKED`，会尝试用安全方式达成目标
 - **防失控** — 最多 10 轮迭代，防止 AI 无限循环
@@ -103,12 +104,12 @@ Sources/
 ├── App/
 │   └── DependencyContainer.swift   # 依赖注入 + ToolRegistry 组装
 ├── Domain/                         # 业务逻辑
-│   ├── Entities/                   # Server, Message, ToolCall, ToolExecutionResult, ToolError...
+│   ├── Entities/                   # Server, Message, ToolCall, StreamingDelta, ToolExecutionResult...
 │   ├── Protocols/                  # SSH, AI, Tool, ToolRegistry 抽象接口
 │   └── UseCases/                   # 核心编排 (Agentic Loop)
 ├── Data/                           # 数据层实现
 │   ├── SSH/                        # SSH 客户端 (Citadel)
-│   ├── Network/                    # AI API 直连 (OpenAI Function Calling) + 上下文窗口管理
+│   ├── Network/                    # AI API 直连 (OpenAI Function Calling) + SSE 流式 + 上下文窗口管理
 │   ├── Tools/                      # 工具实现 (ToolRegistry + 8 个工具)
 │   ├── Persistence/                # SwiftData 持久化 (Server, ServerGroup, Conversation, Message)
 │   └── Security/                   # Keychain
@@ -139,6 +140,7 @@ Sources/
 ## 功能亮点
 
 - **多工具架构** — 可插拔的 ToolProtocol 体系，AI 自主选择最合适的工具，新增工具只需实现协议并注册
+- **流式输出 + 思维链** — SSE 实时接收 AI 响应；推理模型 (DeepSeek R1, o1/o3 等) 的思考过程实时展开，完成后自动折叠，点击可重新展开
 - **中英双语** — 完整的 `Localizable.xcstrings` 字符串目录，跟随系统语言自动切换中/英文
 - **服务器分组** — 按分组管理服务器，支持创建/删除分组，新建服务器时可选择所属分组
 - **对话搜索** — 在服务器列表页下拉搜索，按对话标题和消息内容全文检索历史记录，点击结果直达对应对话
@@ -152,7 +154,7 @@ Sources/
 | UI | SwiftUI + @Observable |
 | 平台 | iOS 26+ / macOS 26+ / visionOS 26+ |
 | SSH 连接 | [Citadel](https://github.com/orlandos-nl/citadel) (基于 SwiftNIO SSH) |
-| AI 集成 | OpenAI Function Calling — 客户端直连，支持任意兼容 API，自动上下文压缩 |
+| AI 集成 | OpenAI Function Calling — 客户端直连，SSE 流式输出，支持任意兼容 API，自动上下文压缩 |
 | 工具系统 | ToolProtocol + ToolRegistry（可插拔，自描述 schema） |
 | 持久化 | SwiftData (@Model, @ModelActor) |
 | 本地化 | Localizable.xcstrings (en / zh-Hans) |
@@ -168,6 +170,7 @@ Sources/
 - [x] ~~服务器分组管理~~ (分组 CRUD + 服务器归组)
 - [x] ~~多工具架构~~ (ToolProtocol 可插拔体系 + 8 个内置工具)
 - [x] ~~上下文窗口管理~~ (Token 估算 + 自动摘要压缩 + UI 百分比指示器 + 可配置 maxContextTokens)
+- [x] ~~流式输出 + 思维链展示~~ (SSE streaming + reasoning_content 实时展开/自动折叠 + 持久化)
 - [ ] 云端 API 代理 (后端持有 Key + 用户鉴权 + 按 tier 限次：free 5次/天，paid 100次/天；保留自带 Key 作为高级选项)
 - [ ] API Key 迁移到 Keychain (当前存 UserDefaults 明文，需改为加密存储)
 - [x] ~~设置页接入主导航~~ (TabView 底部标签栏：服务器 + 设置)

@@ -11,6 +11,9 @@ final class ChatViewModel {
     var pendingToolCall: ToolCall?
     var showConfirmation: Bool = false
     var contextUsagePercent: Double = 0
+    var activeReasoningText: String = ""
+    var activeContentText: String = ""
+    var isStreaming: Bool = false
 
     private var server: Server
     private var conversationID: UUID
@@ -119,9 +122,24 @@ final class ChatViewModel {
 
             let serverContext = "Host: \(server.host), User: \(server.username), OS: Linux"
 
+            // Reset streaming state
+            activeReasoningText = ""
+            activeContentText = ""
+            isStreaming = true
+
             useCase.onToolCallNeedsConfirmation = { [weak self] toolCall in
                 guard let self else { return .denied }
                 return await self.requestConfirmation(for: toolCall)
+            }
+
+            useCase.onReasoningUpdate = { [weak self] chunk in
+                guard let self else { return }
+                self.activeReasoningText += chunk
+            }
+
+            useCase.onContentUpdate = { [weak self] chunk in
+                guard let self else { return }
+                self.activeContentText += chunk
             }
 
             useCase.onIntermediateMessage = { [weak self] message in
@@ -129,8 +147,11 @@ final class ChatViewModel {
                 // Remove loading indicator and add the real message
                 self.messages.removeAll { $0.isLoading }
                 self.messages.append(message)
+                // Reset content text for next round (reasoning persists across rounds)
+                self.activeContentText = ""
                 // Add new loading indicator if more processing expected
                 if message.role == .command {
+                    self.isStreaming = true
                     let loading = Message(id: UUID(), role: .assistant, content: "", isLoading: true)
                     self.messages.append(loading)
                 }
@@ -161,6 +182,9 @@ final class ChatViewModel {
             self.error = error.localizedDescription
         }
 
+        isStreaming = false
+        activeReasoningText = ""
+        activeContentText = ""
         isProcessing = false
         updateContextUsage()
     }

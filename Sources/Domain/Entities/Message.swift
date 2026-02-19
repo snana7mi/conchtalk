@@ -7,6 +7,7 @@ nonisolated struct Message: Identifiable, Sendable {
     var timestamp: Date
     var toolCall: ToolCall?     // Non-nil for tool-call messages
     var toolOutput: String?     // Raw output from tool execution
+    var reasoningContent: String? // AI reasoning/thinking chain (e.g. DeepSeek R1)
     var isLoading: Bool
 
     enum MessageRole: String, Codable, Sendable {
@@ -16,13 +17,14 @@ nonisolated struct Message: Identifiable, Sendable {
         case system
     }
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCall: ToolCall? = nil, toolOutput: String? = nil, isLoading: Bool = false) {
+    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCall: ToolCall? = nil, toolOutput: String? = nil, reasoningContent: String? = nil, isLoading: Bool = false) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
         self.toolCall = toolCall
         self.toolOutput = toolOutput
+        self.reasoningContent = reasoningContent
         self.isLoading = isLoading
     }
 }

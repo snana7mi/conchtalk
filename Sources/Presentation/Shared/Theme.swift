@@ -9,6 +9,7 @@ enum Theme {
     static let systemMessageColor = Color.secondary.opacity(0.3)
     static let destructiveColor = Color.red
     static let safeColor = Color.green
+    static let reasoningBubbleColor = Color.purple.opacity(0.05)
 
     // Fonts
     static let messageFont = Font.body

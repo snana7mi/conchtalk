@@ -10,8 +10,18 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: Theme.messageSpacing) {
                         ForEach(viewModel.messages) { message in
-                            MessageBubbleView(message: message)
+                            if message.isLoading {
+                                MessageBubbleView(
+                                    message: message,
+                                    liveReasoningText: viewModel.activeReasoningText.isEmpty ? nil : viewModel.activeReasoningText,
+                                    liveContentText: viewModel.activeContentText.isEmpty ? nil : viewModel.activeContentText,
+                                    isStreaming: viewModel.isStreaming
+                                )
                                 .id(message.id)
+                            } else {
+                                MessageBubbleView(message: message)
+                                    .id(message.id)
+                            }
                         }
                     }
                     .padding(.horizontal, Theme.screenPadding)
@@ -28,6 +38,16 @@ struct ChatView: View {
                         withAnimation(.easeOut(duration: 0.3)) {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
+                    }
+                }
+                .onChange(of: viewModel.activeReasoningText) {
+                    if let lastMessage = viewModel.messages.last {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.activeContentText) {
+                    if let lastMessage = viewModel.messages.last {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
                 }
             }

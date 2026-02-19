@@ -6,8 +6,8 @@ import Citadel
 
 // MARK: - NID Constants (from BoringSSL nid.h)
 
-private let kNID_sha256: CInt = 672
-private let kNID_sha512: CInt = 674
+private nonisolated let kNID_sha256: CInt = 672
+private nonisolated let kNID_sha512: CInt = 674
 
 // MARK: - Config Protocol (Phantom Type)
 
@@ -51,7 +51,7 @@ nonisolated enum SHA512Config: RSASHA2Config {
 extension ByteBuffer {
     /// Write bytes as SSH string (uint32 length + data).
     @discardableResult
-    fileprivate mutating func sshWriteBytes(_ bytes: some Collection<UInt8>) -> Int {
+    fileprivate nonisolated mutating func sshWriteBytes(_ bytes: some Collection<UInt8>) -> Int {
         var written = writeInteger(UInt32(bytes.count))
         written += writeBytes(bytes)
         return written
@@ -59,7 +59,7 @@ extension ByteBuffer {
 
     /// Write an integer as SSH mpint (big-endian, leading zero if high bit set).
     @discardableResult
-    fileprivate mutating func sshWriteMPInt(_ bytes: [UInt8]) -> Int {
+    fileprivate nonisolated mutating func sshWriteMPInt(_ bytes: [UInt8]) -> Int {
         if bytes.isEmpty || (bytes.count == 1 && bytes[0] == 0) {
             return writeInteger(UInt32(0))
         }
@@ -82,7 +82,7 @@ extension ByteBuffer {
     }
 
     /// Read SSH string and return raw bytes.
-    fileprivate mutating func sshReadBytes() -> [UInt8]? {
+    fileprivate nonisolated mutating func sshReadBytes() -> [UInt8]? {
         guard let length = readInteger(as: UInt32.self),
               readableBytes >= length,
               let bytes = readBytes(length: Int(length)) else {
@@ -92,7 +92,7 @@ extension ByteBuffer {
     }
 
     /// Read SSH mpint and return raw bytes (leading zero stripped).
-    fileprivate mutating func sshReadMPInt() -> [UInt8]? {
+    fileprivate nonisolated mutating func sshReadMPInt() -> [UInt8]? {
         guard let length = readInteger(as: UInt32.self) else { return nil }
         if length == 0 { return [0] }
         guard readableBytes >= length,

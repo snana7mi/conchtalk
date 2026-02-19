@@ -122,12 +122,164 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                 argumentsJSON: argData,
                 explanation: explanation
             )
-            return .toolCall(toolCall)
+            let reasoning = message["reasoning_content"] as? String
+            return .toolCall(toolCall, reasoning: reasoning)
         }
 
         // Text response
         let content = message["content"] as? String ?? ""
-        return .text(content)
+        let reasoning = message["reasoning_content"] as? String
+        return .text(content, reasoning: reasoning)
+    }
+
+    // MARK: - Streaming API
+
+    func sendMessageStreaming(_ message: String, conversationHistory: [Message], serverContext: String) -> AsyncStream<StreamingDelta> {
+        AsyncStream { continuation in
+            Task {
+                do {
+                    var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
+                    messages.append(["role": "user", "content": message])
+                    messages = try await compressIfNeeded(messages)
+                    await callOpenAIStreaming(messages: messages, continuation: continuation)
+                } catch {
+                    continuation.yield(.error(error))
+                    continuation.finish()
+                }
+            }
+        }
+    }
+
+    func sendToolResultStreaming(_ result: String, forToolCall toolCall: ToolCall, conversationHistory: [Message], serverContext: String) -> AsyncStream<StreamingDelta> {
+        AsyncStream { continuation in
+            Task {
+                do {
+                    var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
+                    messages = try await compressIfNeeded(messages)
+                    await callOpenAIStreaming(messages: messages, continuation: continuation)
+                } catch {
+                    continuation.yield(.error(error))
+                    continuation.finish()
+                }
+            }
+        }
+    }
+
+    private func callOpenAIStreaming(messages: [[String: Any]], continuation: AsyncStream<StreamingDelta>.Continuation) async {
+        let settings = AISettings.load()
+        guard !settings.apiKey.isEmpty else {
+            continuation.yield(.error(AIServiceError.apiKeyMissing))
+            continuation.finish()
+            return
+        }
+
+        let baseURL = settings.baseURL.isEmpty ? "https://api.openai.com/v1" : settings.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(baseURL)/chat/completions") else {
+            continuation.yield(.error(AIServiceError.invalidResponse))
+            continuation.finish()
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+
+        let body: [String: Any] = [
+            "model": settings.modelName,
+            "messages": messages,
+            "tools": toolRegistry.openAIToolDefinitions(),
+            "stream": true,
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            continuation.yield(.error(error))
+            continuation.finish()
+            return
+        }
+
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                continuation.yield(.error(AIServiceError.apiError(statusCode: statusCode, message: "Streaming request failed")))
+                continuation.finish()
+                return
+            }
+
+            // Accumulate tool call pieces across chunks
+            var toolCallID: String?
+            var toolCallName: String?
+            var toolCallArgs = ""
+            var hasToolCall = false
+
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data: ") else { continue }
+                let payload = String(line.dropFirst(6))
+                if payload == "[DONE]" { break }
+
+                guard let data = payload.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let choices = json["choices"] as? [[String: Any]],
+                      let choice = choices.first,
+                      let delta = choice["delta"] as? [String: Any] else {
+                    continue
+                }
+
+                // Reasoning content (DeepSeek R1, etc.)
+                if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
+                    continuation.yield(.reasoning(reasoning))
+                }
+
+                // Content
+                if let content = delta["content"] as? String, !content.isEmpty {
+                    continuation.yield(.content(content))
+                }
+
+                // Tool calls (accumulated across chunks)
+                if let toolCalls = delta["tool_calls"] as? [[String: Any]],
+                   let tc = toolCalls.first {
+                    hasToolCall = true
+                    if let id = tc["id"] as? String {
+                        toolCallID = id
+                    }
+                    if let function = tc["function"] as? [String: Any] {
+                        if let name = function["name"] as? String {
+                            toolCallName = name
+                        }
+                        if let args = function["arguments"] as? String {
+                            toolCallArgs += args
+                        }
+                    }
+                }
+            }
+
+            // If we accumulated a complete tool call, yield it
+            if hasToolCall,
+               let id = toolCallID,
+               let name = toolCallName,
+               let argData = toolCallArgs.data(using: .utf8) {
+                let explanation: String
+                if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
+                   let expl = args["explanation"] as? String {
+                    explanation = expl
+                } else {
+                    explanation = name
+                }
+                let toolCall = ToolCall(id: id, toolName: name, argumentsJSON: argData, explanation: explanation)
+                continuation.yield(.toolCall(toolCall))
+            }
+
+            continuation.yield(.done)
+            continuation.finish()
+        } catch {
+            continuation.yield(.error(error))
+            continuation.finish()
+        }
     }
 
     // MARK: - Message Conversion

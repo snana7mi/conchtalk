@@ -10,10 +10,11 @@ final class MessageModel {
     var commandJSON: Data?     // Legacy: encoded SSHCommand (read-only for backward compat)
     var commandOutput: String? // Legacy field name, also used by new messages
     var toolCallJSON: Data?    // New: encoded ToolCall
+    var reasoningContent: String? // AI reasoning/thinking chain
 
     var conversation: ConversationModel?
 
-    init(id: UUID = UUID(), roleRaw: String, content: String, timestamp: Date = Date(), commandJSON: Data? = nil, commandOutput: String? = nil, toolCallJSON: Data? = nil) {
+    init(id: UUID = UUID(), roleRaw: String, content: String, timestamp: Date = Date(), commandJSON: Data? = nil, commandOutput: String? = nil, toolCallJSON: Data? = nil, reasoningContent: String? = nil) {
         self.id = id
         self.roleRaw = roleRaw
         self.content = content
@@ -21,6 +22,7 @@ final class MessageModel {
         self.commandJSON = commandJSON
         self.commandOutput = commandOutput
         self.toolCallJSON = toolCallJSON
+        self.reasoningContent = reasoningContent
     }
 
     func toDomain() -> Message {
@@ -28,7 +30,7 @@ final class MessageModel {
 
         // Try new toolCallJSON first
         if let data = toolCallJSON, let toolCall = try? JSONDecoder().decode(ToolCall.self, from: data) {
-            return Message(id: id, role: role, content: content, timestamp: timestamp, toolCall: toolCall, toolOutput: commandOutput, isLoading: false)
+            return Message(id: id, role: role, content: content, timestamp: timestamp, toolCall: toolCall, toolOutput: commandOutput, reasoningContent: reasoningContent, isLoading: false)
         }
 
         // Fallback: legacy SSHCommand → wrap as ToolCall
@@ -40,10 +42,10 @@ final class MessageModel {
                 argumentsJSON: argsJSON,
                 explanation: sshCommand.explanation
             )
-            return Message(id: id, role: role, content: content, timestamp: timestamp, toolCall: toolCall, toolOutput: commandOutput, isLoading: false)
+            return Message(id: id, role: role, content: content, timestamp: timestamp, toolCall: toolCall, toolOutput: commandOutput, reasoningContent: reasoningContent, isLoading: false)
         }
 
-        return Message(id: id, role: role, content: content, timestamp: timestamp, toolCall: nil, toolOutput: nil, isLoading: false)
+        return Message(id: id, role: role, content: content, timestamp: timestamp, toolCall: nil, toolOutput: nil, reasoningContent: reasoningContent, isLoading: false)
     }
 
     static func fromDomain(_ message: Message) -> MessageModel {
@@ -58,7 +60,8 @@ final class MessageModel {
             timestamp: message.timestamp,
             commandJSON: nil,  // No longer write legacy field
             commandOutput: message.toolOutput,
-            toolCallJSON: toolCallData
+            toolCallJSON: toolCallData,
+            reasoningContent: message.reasoningContent
         )
     }
 }
