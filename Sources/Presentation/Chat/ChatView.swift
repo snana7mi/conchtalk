@@ -17,6 +17,12 @@ struct ChatView: View {
                     .padding(.horizontal, Theme.screenPadding)
                     .padding(.vertical, 8)
                 }
+                .scrollDismissesKeyboard(.interactively)
+                #if os(iOS)
+                .onTapGesture {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                #endif
                 .onChange(of: viewModel.messages.count) {
                     if let lastMessage = viewModel.messages.last {
                         withAnimation(.easeOut(duration: 0.3)) {
@@ -33,6 +39,7 @@ struct ChatView: View {
                 text: $viewModel.inputText,
                 isProcessing: viewModel.isProcessing,
                 isConnected: viewModel.isConnected,
+                contextUsagePercent: viewModel.contextUsagePercent,
                 onSend: {
                     Task { await viewModel.sendMessage() }
                 }

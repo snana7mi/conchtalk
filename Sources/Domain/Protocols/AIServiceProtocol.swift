@@ -9,4 +9,5 @@ enum AIResponse: Sendable {
 protocol AIServiceProtocol: Sendable {
     func sendMessage(_ message: String, conversationHistory: [Message], serverContext: String) async throws -> AIResponse
     func sendToolResult(_ result: String, forToolCall: ToolCall, conversationHistory: [Message], serverContext: String) async throws -> AIResponse
+    func estimateContextUsage(history: [Message], serverContext: String) -> Double
 }

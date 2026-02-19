@@ -108,7 +108,7 @@ Sources/
 │   └── UseCases/                   # 核心编排 (Agentic Loop)
 ├── Data/                           # 数据层实现
 │   ├── SSH/                        # SSH 客户端 (Citadel)
-│   ├── Network/                    # AI API 直连 (OpenAI Function Calling)
+│   ├── Network/                    # AI API 直连 (OpenAI Function Calling) + 上下文窗口管理
 │   ├── Tools/                      # 工具实现 (ToolRegistry + 8 个工具)
 │   ├── Persistence/                # SwiftData 持久化 (Server, ServerGroup, Conversation, Message)
 │   └── Security/                   # Keychain
@@ -143,6 +143,7 @@ Sources/
 - **服务器分组** — 按分组管理服务器，支持创建/删除分组，新建服务器时可选择所属分组
 - **对话搜索** — 在服务器列表页下拉搜索，按对话标题和消息内容全文检索历史记录，点击结果直达对应对话
 - **智能命令确认** — 每个工具自带安全校验，按级别自动执行或弹框确认，危险命令直接拦截
+- **上下文窗口管理** — 自动估算 token 用量（中英文混合感知），超限时 AI 生成摘要压缩旧消息，输入框上方实时显示上下文使用百分比（绿/黄/红）
 
 ## 技术栈
 
@@ -151,7 +152,7 @@ Sources/
 | UI | SwiftUI + @Observable |
 | 平台 | iOS 26+ / macOS 26+ / visionOS 26+ |
 | SSH 连接 | [Citadel](https://github.com/orlandos-nl/citadel) (基于 SwiftNIO SSH) |
-| AI 集成 | OpenAI Function Calling — 客户端直连，支持任意兼容 API |
+| AI 集成 | OpenAI Function Calling — 客户端直连，支持任意兼容 API，自动上下文压缩 |
 | 工具系统 | ToolProtocol + ToolRegistry（可插拔，自描述 schema） |
 | 持久化 | SwiftData (@Model, @ModelActor) |
 | 本地化 | Localizable.xcstrings (en / zh-Hans) |
@@ -166,6 +167,7 @@ Sources/
 - [x] ~~对话历史搜索~~ (按标题和消息内容全文检索)
 - [x] ~~服务器分组管理~~ (分组 CRUD + 服务器归组)
 - [x] ~~多工具架构~~ (ToolProtocol 可插拔体系 + 8 个内置工具)
+- [x] ~~上下文窗口管理~~ (Token 估算 + 自动摘要压缩 + UI 百分比指示器 + 可配置 maxContextTokens)
 - [ ] 云端 API 代理 (后端持有 Key + 用户鉴权 + 按 tier 限次：free 5次/天，paid 100次/天；保留自带 Key 作为高级选项)
 - [ ] API Key 迁移到 Keychain (当前存 UserDefaults 明文，需改为加密存储)
 - [x] ~~设置页接入主导航~~ (TabView 底部标签栏：服务器 + 设置)

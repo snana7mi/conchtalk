@@ -10,6 +10,7 @@ final class ChatViewModel {
     var error: String?
     var pendingToolCall: ToolCall?
     var showConfirmation: Bool = false
+    var contextUsagePercent: Double = 0
 
     private var server: Server
     private var conversationID: UUID
@@ -35,11 +36,20 @@ final class ChatViewModel {
         "\(server.username)@\(server.host)"
     }
 
+    func updateContextUsage() {
+        let serverContext = "Host: \(server.host), User: \(server.username), OS: Linux"
+        contextUsagePercent = aiService.estimateContextUsage(
+            history: messages.filter { !$0.isLoading },
+            serverContext: serverContext
+        )
+    }
+
     func loadMessages() async {
         do {
             let conversations = try await store.fetchConversations(forServer: server.id)
             if let existing = conversations.first(where: { $0.id == conversationID }) {
                 messages = existing.messages
+                updateContextUsage()
             } else {
                 // Create new conversation
                 let conversation = Conversation(id: conversationID, serverID: server.id)
@@ -152,6 +162,7 @@ final class ChatViewModel {
         }
 
         isProcessing = false
+        updateContextUsage()
     }
 
     private func requestConfirmation(for toolCall: ToolCall) async -> ExecuteNaturalLanguageCommandUseCase.CommandApproval {

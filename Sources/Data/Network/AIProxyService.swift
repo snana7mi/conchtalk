@@ -4,6 +4,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     private let session: URLSession
     private let keychainService: KeychainServiceProtocol
     private let toolRegistry: ToolRegistryProtocol
+    private var cachedSummary: String?
 
     init(keychainService: KeychainServiceProtocol, toolRegistry: ToolRegistryProtocol) {
         let config = URLSessionConfiguration.default
@@ -18,12 +19,42 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     func sendMessage(_ message: String, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
         var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
         messages.append(["role": "user", "content": message])
+        messages = try await compressIfNeeded(messages)
         return try await callOpenAI(messages: messages)
     }
 
     func sendToolResult(_ result: String, forToolCall toolCall: ToolCall, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
-        let messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
+        var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
+        messages = try await compressIfNeeded(messages)
         return try await callOpenAI(messages: messages)
+    }
+
+    // MARK: - Context Usage
+
+    func estimateContextUsage(history: [Message], serverContext: String) -> Double {
+        let settings = AISettings.load()
+        let systemPrompt = Self.systemPrompt(serverContext: serverContext, tools: toolRegistry.tools)
+        return ContextWindowManager.usagePercent(
+            messages: history,
+            systemPrompt: systemPrompt,
+            toolDefinitions: toolRegistry.openAIToolDefinitions(),
+            maxTokens: settings.maxContextTokens
+        )
+    }
+
+    // MARK: - Compression
+
+    private func compressIfNeeded(_ messages: [[String: Any]]) async throws -> [[String: Any]] {
+        let settings = AISettings.load()
+        let (compressed, summary) = try await ContextWindowManager.compress(
+            messages: messages,
+            maxTokens: settings.maxContextTokens,
+            cachedSummary: cachedSummary,
+            using: session,
+            settings: settings
+        )
+        cachedSummary = summary
+        return compressed
     }
 
     // MARK: - OpenAI API
@@ -193,13 +224,18 @@ struct AISettings {
     var apiKey: String
     var baseURL: String
     var modelName: String
+    var maxContextTokensK: Int  // Unit: K (e.g. 128 = 128,000 tokens)
+
+    var maxContextTokens: Int { maxContextTokensK * 1000 }
 
     static func load() -> AISettings {
         let defaults = UserDefaults.standard
+        let storedK = defaults.integer(forKey: "aiMaxContextTokensK")
         return AISettings(
             apiKey: defaults.string(forKey: "aiAPIKey") ?? "",
             baseURL: defaults.string(forKey: "aiBaseURL") ?? "",
-            modelName: defaults.string(forKey: "aiModelName") ?? "gpt-4o"
+            modelName: defaults.string(forKey: "aiModelName") ?? "gpt-4o",
+            maxContextTokensK: storedK > 0 ? storedK : 128
         )
     }
 
@@ -208,6 +244,7 @@ struct AISettings {
         defaults.set(apiKey, forKey: "aiAPIKey")
         defaults.set(baseURL, forKey: "aiBaseURL")
         defaults.set(modelName, forKey: "aiModelName")
+        defaults.set(maxContextTokensK, forKey: "aiMaxContextTokensK")
     }
 }
 
