@@ -176,12 +176,14 @@ final class ChatViewModel {
                 // Remove loading indicator and add the real message
                 self.messages.removeAll { $0.isLoading }
                 self.messages.append(message)
-                // Reset content text for next round (reasoning persists across rounds)
+                // Reset streaming state for next round — each round gets its own thinking bubble
                 self.activeContentText = ""
+                self.activeReasoningText = ""
                 self.isReasoningActive = false
                 // Add new loading indicator if more processing expected
                 if message.role == .command {
                     self.isStreaming = true
+                    self.thinkingBubbleId = UUID()
                     let loading = Message(id: UUID(), role: .assistant, content: "", isLoading: true)
                     self.messages.append(loading)
                 }

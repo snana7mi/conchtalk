@@ -54,7 +54,6 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
     func execute(userMessage: String, conversationHistory: [Message], serverContext: String) async throws -> [Message] {
         var newMessages: [Message] = []
         var history = conversationHistory
-        var allAccumulatedReasoning = ""
 
         // Send user message to AI via streaming
         var response = try await sendWithStreaming { [history] in
@@ -69,21 +68,14 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
 
             switch response {
             case .text(let text, let reasoning):
-                if let r = reasoning, !r.isEmpty {
-                    if !allAccumulatedReasoning.isEmpty { allAccumulatedReasoning += "\n\n" }
-                    allAccumulatedReasoning += r
-                }
-                let fullReasoning: String? = allAccumulatedReasoning.isEmpty ? nil : allAccumulatedReasoning
-                let assistantMsg = Message(role: .assistant, content: text, reasoningContent: fullReasoning)
+                let assistantMsg = Message(role: .assistant, content: text, reasoningContent: reasoning)
                 newMessages.append(assistantMsg)
                 onIntermediateMessage?(assistantMsg)
                 return newMessages // Done!
 
             case .toolCall(let toolCall, let reasoning):
-                if let r = reasoning, !r.isEmpty {
-                    if !allAccumulatedReasoning.isEmpty { allAccumulatedReasoning += "\n\n" }
-                    allAccumulatedReasoning += r
-                }
+                // Each round's reasoning is attached to its own message
+                let roundReasoning = reasoning
                 // 错误分支：工具未注册，回填错误给模型并继续下一轮。
                 guard let tool = toolRegistry.tool(named: toolCall.toolName) else {
                     let errorMsg = Message(role: .system, content: "Unknown tool: \(toolCall.toolName)")
@@ -130,7 +122,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                         // 错误分支：工具执行失败，包装为 command 消息后回填模型继续推进。
                         print("[Tool] \(toolCall.toolName) execution error: \(error)")
                         let errorOutput = "ERROR: \(error.localizedDescription)"
-                        let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput)
+                        let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput, reasoningContent: roundReasoning)
                         newMessages.append(errorMsg)
                         history.append(errorMsg)
                         onIntermediateMessage?(errorMsg)
@@ -142,7 +134,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                         }
                         continue
                     }
-                    let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output)
+                    let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output, reasoningContent: roundReasoning)
                     newMessages.append(cmdMsg)
                     history.append(cmdMsg)
                     onIntermediateMessage?(cmdMsg)
@@ -165,7 +157,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                             // 错误分支：已审批但执行失败，同样回填错误并继续。
                             print("[Tool] \(toolCall.toolName) execution error: \(error)")
                             let errorOutput = "ERROR: \(error.localizedDescription)"
-                            let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput)
+                            let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput, reasoningContent: roundReasoning)
                             newMessages.append(errorMsg)
                             history.append(errorMsg)
                             onIntermediateMessage?(errorMsg)
@@ -177,7 +169,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                             }
                             continue
                         }
-                        let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output)
+                        let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output, reasoningContent: roundReasoning)
                         newMessages.append(cmdMsg)
                         history.append(cmdMsg)
                         onIntermediateMessage?(cmdMsg)
