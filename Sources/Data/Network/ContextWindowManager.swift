@@ -129,7 +129,7 @@ enum ContextWindowManager {
         let currentTokens = estimateTokens(for: messages)
 
         // 超过阈值才压缩，避免高频抖动。
-        guard Double(currentTokens) > Double(maxTokens) * 0.85 else {
+        guard Double(currentTokens) > Double(maxTokens) * 0.95 else {
             return (messages, cachedSummary)
         }
 
