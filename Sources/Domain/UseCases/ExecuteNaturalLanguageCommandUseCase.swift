@@ -61,7 +61,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
         }
 
         // Agentic loop
-        let maxIterations = 10
+        let maxIterations = 50
         var iteration = 0
         while iteration < maxIterations {
             iteration += 1
@@ -210,9 +210,36 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
             }
         }
 
-        // 保护分支：达到最大迭代次数时主动收敛，避免无限工具循环。
-        let timeoutMsg = Message(role: .system, content: "Reached maximum tool execution limit")
-        newMessages.append(timeoutMsg)
+        // 保护分支：达到最大迭代次数，优雅收敛而非硬停。
+        switch response {
+        case .text(let text, let reasoning):
+            // 最后一轮 AI 已经给出了文本回复，直接返回即可。
+            let assistantMsg = Message(role: .assistant, content: text, reasoningContent: reasoning)
+            newMessages.append(assistantMsg)
+            onIntermediateMessage?(assistantMsg)
+
+        case .toolCall(let toolCall, _):
+            // AI 仍想调用工具，用 tool result 通知它收敛并给出总结。
+            let summaryResponse = try await sendWithStreaming { [history] in
+                self.aiService.sendToolResultStreaming(
+                    "SYSTEM: Tool execution limit reached. Do NOT call any more tools. Please provide a comprehensive final answer based on all the information you have gathered so far.",
+                    forToolCall: toolCall,
+                    conversationHistory: history,
+                    serverContext: serverContext
+                )
+            }
+
+            switch summaryResponse {
+            case .text(let text, let reasoning):
+                let assistantMsg = Message(role: .assistant, content: text, reasoningContent: reasoning)
+                newMessages.append(assistantMsg)
+                onIntermediateMessage?(assistantMsg)
+            case .toolCall:
+                // AI 仍然尝试调用工具，硬停兜底
+                let timeoutMsg = Message(role: .system, content: "已达到工具调用上限，请查看上方已收集的信息。")
+                newMessages.append(timeoutMsg)
+            }
+        }
         return newMessages
     }
 
