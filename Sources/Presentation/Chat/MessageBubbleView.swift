@@ -1,10 +1,10 @@
+/// 文件说明：MessageBubbleView，负责聊天模块的界面展示与交互流程。
 import SwiftUI
 
+/// MessageBubbleView：负责界面渲染与用户交互响应。
 struct MessageBubbleView: View {
     let message: Message
-    var liveReasoningText: String? = nil
     var liveContentText: String? = nil
-    var isStreaming: Bool = false
 
     var body: some View {
         switch message.role {
@@ -37,33 +37,18 @@ struct MessageBubbleView: View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
                 if message.isLoading {
-                    // Streaming state: show live reasoning and/or content
-                    if let reasoning = liveReasoningText, !reasoning.isEmpty {
-                        ThinkingBubbleView(
-                            reasoningContent: reasoning,
-                            isLiveStreaming: isStreaming
-                        )
-                    }
-
+                    // Streaming state: thinking bubble shown separately in ChatView
                     if let content = liveContentText, !content.isEmpty {
                         Text(content)
                             .font(Theme.messageFont)
                             .padding(Theme.bubblePadding)
                             .background(Theme.assistantBubbleColor)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleCornerRadius))
-                    } else if liveReasoningText == nil || liveReasoningText!.isEmpty {
-                        // No streaming data yet — show loading dots
+                    } else {
                         loadingDots
                     }
                 } else {
-                    // Persisted message: show saved reasoning if any
-                    if let reasoning = message.reasoningContent, !reasoning.isEmpty {
-                        ThinkingBubbleView(
-                            reasoningContent: reasoning,
-                            isLiveStreaming: false
-                        )
-                    }
-
+                    // Persisted message: reasoning shown separately in ChatView
                     Text(message.content)
                         .font(Theme.messageFont)
                         .padding(Theme.bubblePadding)

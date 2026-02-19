@@ -1,6 +1,10 @@
+/// 文件说明：ChatViewModel，负责聊天页面状态管理、SSH 会话联动与 AI 对话编排。
 import SwiftUI
 import SwiftData
 
+/// ChatViewModel：
+/// 作为 Chat 页面状态中枢，负责管理消息与输入状态、协调 SSH 连接，
+/// 并驱动 AI/工具调用流程将中间结果实时回写到界面。
 @Observable
 final class ChatViewModel {
     var messages: [Message] = []
@@ -14,6 +18,8 @@ final class ChatViewModel {
     var activeReasoningText: String = ""
     var activeContentText: String = ""
     var isStreaming: Bool = false
+    var isReasoningActive: Bool = false
+    var thinkingBubbleId: UUID = UUID()
 
     private var server: Server
     private var conversationID: UUID
@@ -25,6 +31,15 @@ final class ChatViewModel {
 
     private var commandContinuation: CheckedContinuation<ExecuteNaturalLanguageCommandUseCase.CommandApproval, Never>?
 
+    /// 初始化聊天视图模型并注入业务依赖。
+    /// - Parameters:
+    ///   - server: 当前会话绑定的远端服务器。
+    ///   - conversationID: 会话 ID；为空时会自动创建新的会话标识。
+    ///   - store: 本地会话与消息持久化存储。
+    ///   - sshManager: SSH 连接管理器。
+    ///   - aiService: AI 服务抽象。
+    ///   - toolRegistry: 工具注册表。
+    ///   - keychainService: 密码/密钥读取服务。
     init(server: Server, conversationID: UUID? = nil, store: SwiftDataStore, sshManager: SSHSessionManager, aiService: AIServiceProtocol, toolRegistry: ToolRegistryProtocol, keychainService: KeychainServiceProtocol) {
         self.server = server
         self.conversationID = conversationID ?? UUID()
@@ -39,6 +54,8 @@ final class ChatViewModel {
         "\(server.username)@\(server.host)"
     }
 
+    /// 基于当前消息历史估算上下文窗口占用比例。
+    /// - Note: 会忽略 `isLoading` 的占位消息，仅统计真实对话内容。
     func updateContextUsage() {
         let serverContext = "Host: \(server.host), User: \(server.username), OS: Linux"
         contextUsagePercent = aiService.estimateContextUsage(
@@ -47,6 +64,8 @@ final class ChatViewModel {
         )
     }
 
+    /// 加载当前会话消息；若会话不存在则创建新会话并写入初始系统消息。
+    /// - Important: 失败时会写入 `error` 供 UI 展示。
     func loadMessages() async {
         do {
             let conversations = try await store.fetchConversations(forServer: server.id)
@@ -65,6 +84,8 @@ final class ChatViewModel {
         }
     }
 
+    /// 建立到当前服务器的 SSH 连接，并把结果写入会话消息流。
+    /// - Important: 成功后设置 `isConnected = true`；失败会追加系统错误消息。
     func connect() async {
         do {
             var password: String? = nil
@@ -85,6 +106,7 @@ final class ChatViewModel {
         }
     }
 
+    /// 主动断开 SSH 连接并更新本地连接状态。
     func disconnect() async {
         await sshManager.disconnect(from: server.id)
         isConnected = false
@@ -92,6 +114,9 @@ final class ChatViewModel {
         messages.append(msg)
     }
 
+    /// 发送输入框内容并执行一轮完整的 AI Agent 流程（含工具调用与审批）。
+    /// - Important: 会修改 `messages`、`isProcessing`、`isStreaming`、`activeReasoningText` 等 UI 状态。
+    /// - Note: 过程中会把新增消息写入 `store`，结束后刷新上下文占用比例。
     func sendMessage() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isProcessing else { return }
@@ -126,6 +151,8 @@ final class ChatViewModel {
             activeReasoningText = ""
             activeContentText = ""
             isStreaming = true
+            isReasoningActive = false
+            thinkingBubbleId = UUID()
 
             useCase.onToolCallNeedsConfirmation = { [weak self] toolCall in
                 guard let self else { return .denied }
@@ -135,11 +162,13 @@ final class ChatViewModel {
             useCase.onReasoningUpdate = { [weak self] chunk in
                 guard let self else { return }
                 self.activeReasoningText += chunk
+                self.isReasoningActive = true
             }
 
             useCase.onContentUpdate = { [weak self] chunk in
                 guard let self else { return }
                 self.activeContentText += chunk
+                self.isReasoningActive = false
             }
 
             useCase.onIntermediateMessage = { [weak self] message in
@@ -149,6 +178,7 @@ final class ChatViewModel {
                 self.messages.append(message)
                 // Reset content text for next round (reasoning persists across rounds)
                 self.activeContentText = ""
+                self.isReasoningActive = false
                 // Add new loading indicator if more processing expected
                 if message.role == .command {
                     self.isStreaming = true
@@ -183,12 +213,16 @@ final class ChatViewModel {
         }
 
         isStreaming = false
+        isReasoningActive = false
         activeReasoningText = ""
         activeContentText = ""
         isProcessing = false
         updateContextUsage()
     }
 
+    /// 发起工具调用审批，并通过 continuation 挂起等待用户操作。
+    /// - Parameter toolCall: 待审批的工具调用。
+    /// - Returns: 用户审批结果（同意/拒绝）。
     private func requestConfirmation(for toolCall: ToolCall) async -> ExecuteNaturalLanguageCommandUseCase.CommandApproval {
         pendingToolCall = toolCall
         showConfirmation = true
@@ -198,6 +232,7 @@ final class ChatViewModel {
         }
     }
 
+    /// 同意当前待审批工具调用并恢复执行流程。
     func approveCommand() {
         showConfirmation = false
         pendingToolCall = nil
@@ -205,6 +240,7 @@ final class ChatViewModel {
         commandContinuation = nil
     }
 
+    /// 拒绝当前待审批工具调用并恢复执行流程。
     func denyCommand() {
         showConfirmation = false
         pendingToolCall = nil

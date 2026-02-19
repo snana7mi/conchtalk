@@ -1,5 +1,7 @@
+/// 文件说明：ConversationListView，负责聊天模块的界面展示与交互流程。
 import SwiftUI
 
+/// ConversationListView：负责界面渲染与用户交互响应。
 struct ConversationListView: View {
     let server: Server
     let store: SwiftDataStore
@@ -55,6 +57,7 @@ struct ConversationListView: View {
         }
     }
 
+    /// loadConversations：加载并同步当前场景所需数据。
     private func loadConversations() async {
         isLoading = true
         do {
@@ -65,6 +68,7 @@ struct ConversationListView: View {
         isLoading = false
     }
 
+    /// createAndSelect：创建新会话并将其设为当前选中项。
     private func createAndSelect() async {
         let conversation = Conversation(serverID: server.id)
         do {
@@ -76,6 +80,7 @@ struct ConversationListView: View {
         }
     }
 
+    /// deleteConversations：删除目标数据并维护一致性。
     private func deleteConversations(at offsets: IndexSet) async {
         for index in offsets {
             let conversation = conversations[index]
@@ -89,6 +94,7 @@ struct ConversationListView: View {
     }
 }
 
+/// ConversationRow：UI 层组件，承载展示与交互职责。
 private struct ConversationRow: View {
     let conversation: Conversation
 

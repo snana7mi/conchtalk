@@ -1,11 +1,14 @@
+/// 文件说明：KeychainService，实现凭据安全存储与读取能力。
 import Foundation
 import Security
 
+/// KeychainService：提供基础设施层服务能力。
 final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
     private let servicePrefix = "com.cheung.ConchTalk"
 
     // MARK: - Password
 
+    /// savePassword：保存当前数据变更到持久层。
     func savePassword(_ password: String, forServer serverID: UUID) throws {
         guard let data = password.data(using: .utf8) else { throw KeychainError.encodingFailed }
 
@@ -31,6 +34,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
         }
     }
 
+    /// getPassword：获取当前所需的信息或对象。
     func getPassword(forServer serverID: UUID) throws -> String? {
         let key = "\(servicePrefix).password.\(serverID.uuidString)"
 
@@ -52,6 +56,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
         return String(data: data, encoding: .utf8)
     }
 
+    /// deletePassword：删除目标数据并维护一致性。
     func deletePassword(forServer serverID: UUID) throws {
         let key = "\(servicePrefix).password.\(serverID.uuidString)"
 
@@ -68,6 +73,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
 
     // MARK: - SSH Keys
 
+    /// saveSSHKey：保存当前数据变更到持久层。
     func saveSSHKey(_ keyData: Data, withID keyID: String) throws {
         let key = "\(servicePrefix).sshkey.\(keyID)"
 
@@ -90,6 +96,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
         }
     }
 
+    /// getSSHKey：获取当前所需的信息或对象。
     func getSSHKey(withID keyID: String) throws -> Data? {
         let key = "\(servicePrefix).sshkey.\(keyID)"
 
@@ -111,6 +118,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
         return data
     }
 
+    /// deleteSSHKey：删除目标数据并维护一致性。
     func deleteSSHKey(withID keyID: String) throws {
         let key = "\(servicePrefix).sshkey.\(keyID)"
 
@@ -127,6 +135,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
 
     // MARK: - SSH Key Passphrase
 
+    /// saveKeyPassphrase：保存当前数据变更到持久层。
     func saveKeyPassphrase(_ passphrase: String, forKeyID keyID: String) throws {
         guard let data = passphrase.data(using: .utf8) else { throw KeychainError.encodingFailed }
 
@@ -151,6 +160,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
         }
     }
 
+    /// getKeyPassphrase：获取当前所需的信息或对象。
     func getKeyPassphrase(forKeyID keyID: String) throws -> String? {
         let key = "\(servicePrefix).sshkey.passphrase.\(keyID)"
 
@@ -172,6 +182,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
         return String(data: data, encoding: .utf8)
     }
 
+    /// deleteKeyPassphrase：删除目标数据并维护一致性。
     func deleteKeyPassphrase(forKeyID keyID: String) throws {
         let key = "\(servicePrefix).sshkey.passphrase.\(keyID)"
 
@@ -187,6 +198,7 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
     }
 }
 
+/// KeychainError：定义钥匙串读写过程中的错误类型。
 enum KeychainError: LocalizedError {
     case saveFailed(OSStatus)
     case readFailed(OSStatus)

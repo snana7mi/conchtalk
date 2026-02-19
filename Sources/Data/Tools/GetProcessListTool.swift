@@ -1,5 +1,9 @@
+/// 文件说明：GetProcessListTool，提供远端进程列表查询与筛选能力。
 import Foundation
 
+/// GetProcessListTool：
+/// 通过 `ps` 获取进程视图，支持按 CPU/内存/PID 排序并按关键字过滤，
+/// 适用于性能排查与服务定位场景。
 struct GetProcessListTool: ToolProtocol {
     let name = "get_process_list"
     let description = "List running processes on the remote server, optionally filtered by name."
@@ -28,10 +32,17 @@ struct GetProcessListTool: ToolProtocol {
         "required": ["explanation"],
     ]
 
+    /// 进程列表查询为只读操作，可直接执行。
     func validateSafety(arguments: [String: Any]) -> SafetyLevel {
         .safe
     }
 
+    /// 按排序与过滤条件构建进程查询命令。
+    /// - Parameters:
+    ///   - arguments: 可选 `filter`、`sort_by`、`limit`。
+    ///   - sshClient: SSH 执行客户端。
+    /// - Returns: 进程列表文本。
+    /// - Throws: 远端命令执行失败时抛出。
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult {
         let filter = arguments["filter"] as? String
         let sortBy = arguments["sort_by"] as? String ?? "cpu"

@@ -1,5 +1,7 @@
+/// 文件说明：CommandDetailView，负责聊天模块的界面展示与交互流程。
 import SwiftUI
 
+/// CommandDetailView：负责界面渲染与用户交互响应。
 struct CommandDetailView: View {
     let message: Message
     @State private var isExpanded = false
@@ -58,6 +60,7 @@ struct CommandDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleCornerRadius))
     }
 
+    /// detailView：根据工具类型渲染对应的详情视图。
     @ViewBuilder
     private func detailView(for toolCall: ToolCall) -> some View {
         let args = try? toolCall.decodedArguments()

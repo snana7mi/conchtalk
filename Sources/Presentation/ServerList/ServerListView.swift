@@ -1,5 +1,7 @@
+/// 文件说明：ServerListView，负责服务器列表与分组管理界面。
 import SwiftUI
 
+/// ServerListView：负责界面渲染与用户交互响应。
 struct ServerListView: View {
     @State var viewModel: ServerListViewModel
     @State private var editingServer: Server?
@@ -100,6 +102,7 @@ struct ServerListView: View {
     }
 }
 
+/// SearchResultRow：UI 层组件，承载展示与交互职责。
 private struct SearchResultRow: View {
     let result: ConversationSearchResult
 
@@ -119,6 +122,7 @@ private struct SearchResultRow: View {
     }
 }
 
+/// ServerRowView：负责界面渲染与用户交互响应。
 struct ServerRowView: View {
     let server: Server
 

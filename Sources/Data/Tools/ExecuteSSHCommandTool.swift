@@ -1,5 +1,9 @@
+/// 文件说明：ExecuteSSHCommandTool，提供通用远端命令执行能力并内置风险分级。
 import Foundation
 
+/// ExecuteSSHCommandTool：
+/// 作为兜底型工具执行任意 SSH 命令，并通过模式匹配与白名单策略
+/// 对高风险命令做拦截或二次确认。
 struct ExecuteSSHCommandTool: ToolProtocol {
     let name = "execute_ssh_command"
     let description = "Execute an SSH command on the remote server. Use this to run commands that help accomplish the user's task."
@@ -25,6 +29,7 @@ struct ExecuteSSHCommandTool: ToolProtocol {
 
     // MARK: - Safety Validation
 
+    /// 明确禁止执行的高危命令模式。
     private static let forbiddenPatterns: [String] = [
         #"rm\s+-rf\s+/"#,
         #"rm\s+-fr\s+/"#,
@@ -39,6 +44,7 @@ struct ExecuteSSHCommandTool: ToolProtocol {
         #"curl.*\|\s*bash"#,
     ]
 
+    /// 常见只读/低风险命令白名单（用于自动放行判定）。
     private static let safeCommands: [String] = [
         "ls", "ll", "la",
         "cat", "head", "tail", "less", "more",
@@ -59,6 +65,10 @@ struct ExecuteSSHCommandTool: ToolProtocol {
         "journalctl",
     ]
 
+    /// 评估命令风险级别并决定是否需要确认。
+    /// - Parameter arguments: 工具入参，至少包含 `command` 与 `is_destructive`。
+    /// - Returns: 命令安全级别（safe / needsConfirmation / forbidden）。
+    /// - Note: 对命令管道会额外检查末端命令是否存在危险落点（如 `| sh`）。
     func validateSafety(arguments: [String: Any]) -> SafetyLevel {
         let cmd = (arguments["command"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let isDestructive = arguments["is_destructive"] as? Bool ?? true
@@ -86,6 +96,12 @@ struct ExecuteSSHCommandTool: ToolProtocol {
         return .needsConfirmation
     }
 
+    /// 在远端执行命令并返回标准化输出。
+    /// - Parameters:
+    ///   - arguments: 工具入参，需包含 `command`。
+    ///   - sshClient: SSH 执行客户端。
+    /// - Returns: 命令标准输出/错误输出的聚合文本。
+    /// - Throws: 缺少命令参数或远端执行失败时抛出。
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult {
         guard let command = arguments["command"] as? String else {
             throw ToolError.missingParameter("command")
@@ -94,6 +110,9 @@ struct ExecuteSSHCommandTool: ToolProtocol {
         return ToolExecutionResult(output: output)
     }
 
+    /// 提取复合命令中的基准命令词（用于安全判定）。
+    /// - Parameter cmd: 原始命令字符串。
+    /// - Returns: 末段命令的首个 token（如 `sudo systemctl restart nginx` -> `sudo`）。
     private func extractBaseCommand(_ cmd: String) -> String {
         let lastCommand = cmd.components(separatedBy: "&&").last?.trimmingCharacters(in: .whitespaces) ?? cmd
         return lastCommand.components(separatedBy: .whitespaces).first ?? cmd

@@ -1,5 +1,7 @@
+/// 文件说明：ChatInputBar，负责聊天模块的界面展示与交互流程。
 import SwiftUI
 
+/// ChatInputBar：UI 层组件，承载展示与交互职责。
 struct ChatInputBar: View {
     @Binding var text: String
     let isProcessing: Bool

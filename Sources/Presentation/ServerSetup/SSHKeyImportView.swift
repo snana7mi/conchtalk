@@ -1,6 +1,8 @@
+/// 文件说明：SSHKeyImportView，负责服务器配置与 SSH 密钥导入流程。
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// SSHKeyImportView：负责界面渲染与用户交互响应。
 struct SSHKeyImportView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var keyText = ""

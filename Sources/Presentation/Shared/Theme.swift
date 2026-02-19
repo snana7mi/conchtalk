@@ -1,5 +1,7 @@
+/// 文件说明：Theme，提供跨页面复用的主题与样式能力。
 import SwiftUI
 
+/// Theme：定义应用可用的主题样式。
 enum Theme {
     // Colors
     static let primaryColor = Color("AccentColor")

@@ -1,10 +1,17 @@
+/// 文件说明：ContextWindowManager，负责上下文占用估算与历史消息压缩策略。
 import Foundation
 
+/// ContextWindowManager：提供上下文窗口估算与压缩的静态能力。
 enum ContextWindowManager {
 
     // MARK: - Token Estimation
 
-    /// Estimate token count for a string (mixed CJK + ASCII heuristic).
+    /// 估算单段文本 token 数（CJK + ASCII 启发式）。
+    /// - Parameter text: 输入文本。
+    /// - Returns: 估算 token 数（至少为 1）。
+    /// - Note:
+    ///   - CJK 按每字符约 1.5~2 token 估算。
+    ///   - ASCII 连续串按约 4 字符 1 token 估算。
     static func estimateTokens(for text: String) -> Int {
         var tokens = 0
         var asciiRun = 0
@@ -27,7 +34,10 @@ enum ContextWindowManager {
         return max(tokens, 1)
     }
 
-    /// Estimate total tokens for an array of OpenAI messages.
+    /// 估算 OpenAI `messages` 数组总 token。
+    /// - Parameter messages: OpenAI 协议消息数组。
+    /// - Returns: 估算 token 总数。
+    /// - Note: 结果包含消息结构开销与 tool_calls JSON 开销。
     static func estimateTokens(for messages: [[String: Any]]) -> Int {
         var total = 0
         for msg in messages {
@@ -49,7 +59,14 @@ enum ContextWindowManager {
         return total
     }
 
-    /// Calculate context usage percentage (0.0 – 1.0+).
+    /// 估算上下文窗口占用比例。
+    /// - Parameters:
+    ///   - messages: 会话消息（自动跳过 loading 占位消息）。
+    ///   - systemPrompt: 系统提示词。
+    ///   - toolDefinitions: 工具定义数组。
+    ///   - maxTokens: 上下文上限。
+    /// - Returns: 占用比例（`0...1+`，大于 1 表示超限风险）。
+    /// - Note: 用于 UI 提示与压缩触发，不等同于服务端精确计量。
     static func usagePercent(
         messages: [Message],
         systemPrompt: String,
@@ -88,8 +105,20 @@ enum ContextWindowManager {
 
     // MARK: - Compression
 
-    /// Compress messages when exceeding token limit.
-    /// Keeps system prompt + recent messages; summarizes old messages via an extra API call.
+    /// 在上下文压力过高时压缩历史消息。
+    /// - Parameters:
+    ///   - messages: 原始 OpenAI 消息数组（首条应为 system）。
+    ///   - maxTokens: 上下文上限。
+    ///   - cachedSummary: 上轮可复用摘要（可选）。
+    ///   - using: 用于生成摘要的网络会话。
+    ///   - settings: AI 设置。
+    /// - Returns: 压缩后消息数组与可复用摘要。
+    /// - Throws: 摘要请求网络失败或序列化失败时抛出。
+    /// - Strategy:
+    ///   - 仅当估算 token 超过上限 85% 时触发压缩。
+    ///   - 预算按 `maxTokens * 0.70` 保留 system + 最近消息。
+    ///   - 更早消息折叠为一条摘要系统消息。
+    /// - Side Effects: 可能发起一次额外摘要请求。
     static func compress(
         messages: [[String: Any]],
         maxTokens: Int,
@@ -99,7 +128,7 @@ enum ContextWindowManager {
     ) async throws -> (compressed: [[String: Any]], summary: String?) {
         let currentTokens = estimateTokens(for: messages)
 
-        // Only compress when > 85% of maxTokens
+        // 超过阈值才压缩，避免高频抖动。
         guard Double(currentTokens) > Double(maxTokens) * 0.85 else {
             return (messages, cachedSummary)
         }
@@ -111,11 +140,11 @@ enum ContextWindowManager {
         let systemMessage = messages[0] // system prompt
         let contentMessages = Array(messages.dropFirst())
 
-        // Budget: maxTokens * 0.7 for recent messages (leave room for response)
+        // 预算保留给 system + 最近消息，并为模型回复预留空间。
         let budget = Int(Double(maxTokens) * 0.70)
         let systemTokens = 4 + estimateTokens(for: systemMessage["content"] as? String ?? "")
 
-        // Walk backwards to find how many recent messages fit
+        // 反向遍历，寻找可保留的“最近消息”切分点。
         var recentTokens = systemTokens
         var splitIndex = contentMessages.count
 
@@ -129,7 +158,7 @@ enum ContextWindowManager {
             if i == 0 { splitIndex = 0 }
         }
 
-        // If nothing to trim, return as-is
+        // 无可裁剪历史时直接返回。
         guard splitIndex > 0 else {
             return (messages, cachedSummary)
         }
@@ -137,7 +166,7 @@ enum ContextWindowManager {
         let oldMessages = Array(contentMessages[..<splitIndex])
         let recentMessages = Array(contentMessages[splitIndex...])
 
-        // Generate summary if we don't have a cached one covering these messages
+        // 优先复用缓存摘要，避免重复调用摘要接口。
         let summary: String
         if let cached = cachedSummary {
             summary = cached
@@ -149,7 +178,7 @@ enum ContextWindowManager {
             )
         }
 
-        // Build compressed message array
+        // 组装压缩后消息：system + summary + recent
         var result: [[String: Any]] = [systemMessage]
 
         if !summary.isEmpty {
@@ -165,6 +194,15 @@ enum ContextWindowManager {
 
     // MARK: - Summary Generation
 
+    /// 生成旧消息摘要文本。
+    /// - Parameters:
+    ///   - messages: 待摘要的历史消息。
+    ///   - using: 网络会话。
+    ///   - settings: AI 设置。
+    /// - Returns: 摘要文本；若摘要失败且可降级时返回空字符串。
+    /// - Throws: 请求体序列化或网络请求异常时抛出。
+    /// - Error Handling:
+    ///   - API Key 缺失、HTTP 非 2xx、响应结构不合法时返回空字符串以降级继续。
     private static func generateSummary(
         for messages: [[String: Any]],
         using session: URLSession,
@@ -183,7 +221,7 @@ enum ContextWindowManager {
         request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 30
 
-        // Build a condensed representation of old messages
+        // 构建紧凑历史文本，降低摘要提示词体积。
         var conversationText = ""
         for msg in messages {
             let role = msg["role"] as? String ?? "unknown"

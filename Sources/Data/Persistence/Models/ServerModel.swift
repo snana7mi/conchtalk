@@ -1,6 +1,9 @@
+/// 文件说明：ServerModel，定义服务器配置在 SwiftData 中的持久化结构。
 import Foundation
 import SwiftData
 
+/// ServerModel：
+/// 服务器持久化模型，记录连接参数、认证方式与分组关系。
 @Model
 final class ServerModel {
     @Attribute(.unique) var id: UUID
@@ -17,6 +20,16 @@ final class ServerModel {
     @Relationship(deleteRule: .cascade)
     var conversations: [ConversationModel] = []
 
+    /// 初始化服务器持久化模型。
+    /// - Parameters:
+    ///   - id: 服务器标识。
+    ///   - name: 展示名称。
+    ///   - host: 主机地址。
+    ///   - port: SSH 端口。
+    ///   - username: 登录用户名。
+    ///   - authMethodRaw: 认证方式原始值（`password` 或 `privateKey:<id>`）。
+    ///   - lastConnectedAt: 最近连接时间。
+    ///   - createdAt: 创建时间。
     init(id: UUID = UUID(), name: String, host: String, port: Int = 22, username: String, authMethodRaw: String, lastConnectedAt: Date? = nil, createdAt: Date = Date()) {
         self.id = id
         self.name = name
@@ -28,6 +41,9 @@ final class ServerModel {
         self.createdAt = createdAt
     }
 
+    /// 转换为领域层 `Server` 实体。
+    /// - Returns: 对应的领域服务器对象。
+    /// - Note: 无法识别的 `authMethodRaw` 会回退为 `.password`。
     func toDomain() -> Server {
         let authMethod: Server.AuthMethod
         if authMethodRaw.hasPrefix("privateKey:") {
@@ -39,6 +55,9 @@ final class ServerModel {
         return Server(id: id, name: name, host: host, port: port, username: username, authMethod: authMethod, groupID: group?.id)
     }
 
+    /// 从领域层 `Server` 构建持久化模型。
+    /// - Parameter server: 领域服务器对象。
+    /// - Returns: 对应的持久化模型实例。
     static func fromDomain(_ server: Server) -> ServerModel {
         let authRaw: String
         switch server.authMethod {

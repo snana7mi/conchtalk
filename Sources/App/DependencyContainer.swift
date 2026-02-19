@@ -1,6 +1,8 @@
+/// 文件说明：DependencyContainer，负责应用级依赖装配与对象创建。
 import Foundation
 import SwiftData
 
+/// DependencyContainer：集中装配应用运行所需依赖并提供工厂方法。
 @Observable
 final class DependencyContainer {
     let modelContainer: ModelContainer
@@ -10,6 +12,7 @@ final class DependencyContainer {
     let aiService: AIProxyService
     let toolRegistry: ToolRegistry
 
+    /// 初始化依赖容器，并装配应用运行所需组件。
     init() {
         // SwiftData
         let schema = Schema([
@@ -49,6 +52,7 @@ final class DependencyContainer {
         self.aiService = AIProxyService(keychainService: keychainService, toolRegistry: toolRegistry)
     }
 
+    /// makeChatViewModel：构建聊天页面所需的视图模型实例。
     func makeChatViewModel(for server: Server, conversationID: UUID? = nil) -> ChatViewModel {
         ChatViewModel(
             server: server,
@@ -61,6 +65,7 @@ final class DependencyContainer {
         )
     }
 
+    /// makeServerListViewModel：构建服务器列表页面的视图模型实例。
     func makeServerListViewModel() -> ServerListViewModel {
         ServerListViewModel(store: store)
     }

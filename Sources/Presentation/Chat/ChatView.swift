@@ -1,5 +1,7 @@
+/// 文件说明：ChatView，负责聊天模块的界面展示与交互流程。
 import SwiftUI
 
+/// ChatView：负责界面渲染与用户交互响应。
 struct ChatView: View {
     @State var viewModel: ChatViewModel
 
@@ -7,20 +9,46 @@ struct ChatView: View {
         VStack(spacing: 0) {
             // Messages
             ScrollViewReader { proxy in
+                let lastUserMessageId = viewModel.messages.last(where: { $0.role == .user })?.id
+
                 ScrollView {
                     LazyVStack(spacing: Theme.messageSpacing) {
                         ForEach(viewModel.messages) { message in
                             if message.isLoading {
                                 MessageBubbleView(
                                     message: message,
-                                    liveReasoningText: viewModel.activeReasoningText.isEmpty ? nil : viewModel.activeReasoningText,
-                                    liveContentText: viewModel.activeContentText.isEmpty ? nil : viewModel.activeContentText,
-                                    isStreaming: viewModel.isStreaming
+                                    liveContentText: viewModel.activeContentText.isEmpty ? nil : viewModel.activeContentText
                                 )
                                 .id(message.id)
                             } else {
                                 MessageBubbleView(message: message)
                                     .id(message.id)
+                            }
+
+                            // Show thinking bubble after each user message
+                            if message.role == .user {
+                                if let reasoning = reasoningAfterUserMessage(message) {
+                                    // Persisted thinking bubble
+                                    HStack {
+                                        ThinkingBubbleView(
+                                            reasoningContent: reasoning,
+                                            isLiveStreaming: false
+                                        )
+                                        Spacer(minLength: 60)
+                                    }
+                                } else if message.id == lastUserMessageId
+                                            && viewModel.isProcessing
+                                            && !viewModel.activeReasoningText.isEmpty {
+                                    // Live streaming thinking bubble
+                                    HStack {
+                                        ThinkingBubbleView(
+                                            reasoningContent: viewModel.activeReasoningText,
+                                            isLiveStreaming: viewModel.isReasoningActive
+                                        )
+                                        Spacer(minLength: 60)
+                                    }
+                                    .id(viewModel.thinkingBubbleId)
+                                }
                             }
                         }
                     }
@@ -99,6 +127,24 @@ struct ChatView: View {
         }
     }
 
+    /// Look ahead from a user message to find the reasoning content of the corresponding assistant response
+    /// reasoningAfterUserMessage：提取某条用户消息后的推理内容。
+    private func reasoningAfterUserMessage(_ userMessage: Message) -> String? {
+        guard let userIndex = viewModel.messages.firstIndex(where: { $0.id == userMessage.id }) else {
+            return nil
+        }
+        for i in (userIndex + 1)..<viewModel.messages.count {
+            let msg = viewModel.messages[i]
+            if msg.role == .user { break }
+            if msg.role == .assistant && !msg.isLoading,
+               let reasoning = msg.reasoningContent, !reasoning.isEmpty {
+                return reasoning
+            }
+        }
+        return nil
+    }
+
+    /// confirmationMessage：生成待确认工具调用的展示文案。
     private func confirmationMessage(for toolCall: ToolCall) -> String {
         let args = try? toolCall.decodedArguments()
 

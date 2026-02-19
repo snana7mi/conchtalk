@@ -1,5 +1,7 @@
+/// 文件说明：AddServerView，负责服务器配置与 SSH 密钥导入流程。
 import SwiftUI
 
+/// AddServerView：负责界面渲染与用户交互响应。
 struct AddServerView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -20,6 +22,7 @@ struct AddServerView: View {
     /// The server being edited, nil for add mode.
     private let editingServer: Server?
 
+    /// AuthType：定义服务器连接时可选的认证方式。
     enum AuthType: CaseIterable {
         case password
         case privateKey
@@ -34,12 +37,14 @@ struct AddServerView: View {
 
     private var isEditing: Bool { editingServer != nil }
 
+    /// 初始化服务器配置表单并注入回调。
     init(groups: [ServerGroup], onSave: @escaping (Server, String?, UUID?) -> Void) {
         self.groups = groups
         self.onSave = onSave
         self.editingServer = nil
     }
 
+    /// 初始化服务器配置表单并注入回调。
     init(editing server: Server, groups: [ServerGroup], onSave: @escaping (Server, String?, UUID?) -> Void) {
         self.groups = groups
         self.onSave = onSave
@@ -150,6 +155,7 @@ struct AddServerView: View {
         (authType == .password ? !password.isEmpty : !sshKeyText.isEmpty)
     }
 
+    /// saveServer：保存当前数据变更到持久层。
     private func saveServer() {
         let portNum = Int(port) ?? 22
         let existingKeyID: String? = if case .privateKey(let keyID) = editingServer?.authMethod { keyID } else { nil }

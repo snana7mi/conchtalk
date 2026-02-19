@@ -5,9 +5,11 @@
 //  Created by cheung on 2026/02/16.
 //
 
+/// 文件说明：ConchTalkApp，应用入口，负责初始化依赖并组织主界面导航。
 import SwiftUI
 import SwiftData
 
+/// ConchTalkApp：应用入口与全局导航的组装点。
 @main
 struct ConchTalkApp: App {
     @State private var container = DependencyContainer()

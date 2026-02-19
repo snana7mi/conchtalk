@@ -1,6 +1,8 @@
+/// 文件说明：ServerListViewModel，负责服务器列表与分组管理界面。
 import SwiftUI
 import SwiftData
 
+/// ServerListViewModel：管理界面状态，并协调交互与业务调用。
 @Observable
 final class ServerListViewModel {
     var servers: [Server] = []
@@ -18,10 +20,12 @@ final class ServerListViewModel {
 
     private let store: SwiftDataStore
 
+    /// 初始化视图模型，并注入所需业务依赖。
     init(store: SwiftDataStore) {
         self.store = store
     }
 
+    /// loadServers：加载并同步当前场景所需数据。
     func loadServers() async {
         isLoading = true
         do {
@@ -34,6 +38,7 @@ final class ServerListViewModel {
         isLoading = false
     }
 
+    /// deleteServer：删除目标数据并维护一致性。
     func deleteServer(_ server: Server) async {
         do {
             try await store.deleteServer(server.id)
@@ -44,6 +49,7 @@ final class ServerListViewModel {
         }
     }
 
+    /// addServer：追加新数据并更新相关状态。
     func addServer(_ server: Server, password: String?, groupID: UUID?) async {
         do {
             try await store.saveServer(server)
@@ -61,6 +67,7 @@ final class ServerListViewModel {
         }
     }
 
+    /// updateServer：更新状态并触发后续联动。
     func updateServer(_ server: Server, password: String?, groupID: UUID?) async {
         do {
             try await store.updateServer(server)
@@ -77,6 +84,7 @@ final class ServerListViewModel {
 
     // MARK: - Group Operations
 
+    /// addGroup：追加新数据并更新相关状态。
     func addGroup(_ name: String) async {
         let group = ServerGroup(name: name, sortOrder: groups.count)
         do {
@@ -88,6 +96,7 @@ final class ServerListViewModel {
         }
     }
 
+    /// deleteGroup：删除目标数据并维护一致性。
     func deleteGroup(_ groupID: UUID) async {
         do {
             try await store.deleteGroup(groupID)
@@ -100,6 +109,7 @@ final class ServerListViewModel {
 
     // MARK: - Search
 
+    /// search：根据关键词筛选并更新会话结果。
     func search() async {
         guard !searchText.isEmpty else {
             searchResults = []

@@ -1,12 +1,16 @@
+/// 文件说明：PEMKeyParser，负责传统 PEM 私钥解析、解密与 RSA 关键参数提取。
 import Foundation
 import CCryptoBoringSSL
 import CommonCrypto
 
-/// Parses traditional PEM format private keys (PKCS#1 RSA).
-/// Citadel only supports OpenSSH format natively; this extends support to legacy PEM.
+/// PEMKeyParser：
+/// 用于补齐 Citadel 对传统 PEM 私钥格式（PKCS#1/加密 PEM）的兼容能力，
+/// 最终输出 RSA 认证所需的 `(n, e, d)` 原始字节。
 nonisolated enum PEMKeyParser {
 
-    /// Check if the key string is in PEM format (not OpenSSH)
+    /// 判断给定私钥文本是否为 PEM 格式（而非 OpenSSH 新格式）。
+    /// - Parameter keyString: 原始私钥文本。
+    /// - Returns: `true` 表示命中支持的 PEM 头部。
     static func isPEMFormat(_ keyString: String) -> Bool {
         let t = keyString.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.hasPrefix("-----BEGIN RSA PRIVATE KEY-----") ||
@@ -14,7 +18,14 @@ nonisolated enum PEMKeyParser {
                t.hasPrefix("-----BEGIN ENCRYPTED PRIVATE KEY-----")
     }
 
-    /// Parse a PEM RSA private key and return the raw key components (n, e, d).
+    /// 解析 PEM RSA 私钥并提取关键参数 `(n, e, d)`。
+    /// - Parameters:
+    ///   - pemString: PEM 文本。
+    ///   - passphrase: 私钥口令（加密 PEM 时必填）。
+    /// - Returns: RSA 关键参数字节数组（模数、公钥指数、私钥指数）。
+    /// - Throws:
+    ///   - PEM 结构或 base64 非法时抛出解析错误。
+    ///   - 加密 PEM 未提供口令或解密失败时抛出对应错误。
     static func parseRSAKeyBytes(pemString: String, passphrase: String?) throws -> (n: [UInt8], e: [UInt8], d: [UInt8]) {
         let (derData, encryption) = try extractPEMBody(pemString)
 
@@ -35,12 +46,16 @@ nonisolated enum PEMKeyParser {
 
     // MARK: - PEM Envelope
 
+    /// PEMEncryption：描述 PEM 头部声明的加密算法与 IV 参数。
     struct PEMEncryption: Sendable {
         let cipher: String
         let iv: [UInt8]
     }
 
-    /// Strip PEM headers, detect encryption, decode base64.
+    /// 去除 PEM 头尾并解析加密头，返回主体 DER 数据。
+    /// - Parameter pem: PEM 原文。
+    /// - Returns: DER 字节数据与可选加密参数。
+    /// - Throws: base64 解码失败时抛出 `PEMParseError.invalidBase64`。
     private static func extractPEMBody(_ pem: String) throws -> (Data, PEMEncryption?) {
         var lines = pem.components(separatedBy: .newlines)
 
@@ -86,7 +101,13 @@ nonisolated enum PEMKeyParser {
 
     // MARK: - PEM Decryption (legacy OpenSSL encryption)
 
-    /// Decrypt PEM-encrypted data using EVP_BytesToKey key derivation + cipher.
+    /// 使用 OpenSSL 兼容流程解密 PEM 主体数据。
+    /// - Parameters:
+    ///   - data: 加密后的 DER 数据。
+    ///   - encryption: PEM 头部解析得到的加密参数。
+    ///   - passphrase: 解密口令。
+    /// - Returns: 解密后的 DER 数据。
+    /// - Throws: 不支持算法或解密失败时抛出对应错误。
     private static func decryptPEM(_ data: Data, encryption: PEMEncryption, passphrase: String) throws -> Data {
         let passphraseBytes = Array(passphrase.utf8)
         let salt = Array(encryption.iv.prefix(8))
@@ -131,7 +152,12 @@ nonisolated enum PEMKeyParser {
         return Data(outBuffer.prefix(outLength))
     }
 
-    /// EVP_BytesToKey with MD5 — the key derivation OpenSSL uses for encrypted PEM files.
+    /// 按 OpenSSL `EVP_BytesToKey(MD5)` 规则派生对称密钥。
+    /// - Parameters:
+    ///   - password: 口令字节。
+    ///   - salt: 盐值（取 IV 前 8 字节）。
+    ///   - keyLen: 目标密钥长度。
+    /// - Returns: 派生后的密钥字节数组。
     private static func evpBytesToKey(password: [UInt8], salt: [UInt8], keyLen: Int) -> [UInt8] {
         var derived = [UInt8]()
         var previousHash = [UInt8]()
@@ -152,8 +178,10 @@ nonisolated enum PEMKeyParser {
 
     // MARK: - ASN.1 DER Parser (PKCS#1 RSA)
 
-    /// Parse PKCS#1 RSAPrivateKey DER:
-    /// SEQUENCE { version, n, e, d, p, q, dp, dq, qinv }
+    /// 解析 PKCS#1 `RSAPrivateKey` ASN.1 DER 结构并提取 `(n, e, d)`。
+    /// - Parameter data: DER 数据。
+    /// - Returns: 模数、公钥指数、私钥指数。
+    /// - Throws: ASN.1 结构不合法时抛出 `PEMParseError.invalidASN1`。
     private static func parsePKCS1(_ data: Data) throws -> (n: Data, e: Data, d: Data) {
         let bytes = Array(data)
         var offset = 0
@@ -181,7 +209,12 @@ nonisolated enum PEMKeyParser {
         return (n: n, e: e, d: d)
     }
 
-    /// Read ASN.1 DER length encoding
+    /// 读取 ASN.1 DER 的长度字段。
+    /// - Parameters:
+    ///   - bytes: DER 原始字节序列。
+    ///   - offset: 当前读取偏移（会被推进）。
+    /// - Returns: 当前字段长度。
+    /// - Throws: 长度编码非法或越界时抛出 `PEMParseError.invalidASN1`。
     private static func readDERLength(_ bytes: [UInt8], _ offset: inout Int) throws -> Int {
         guard offset < bytes.count else { throw PEMParseError.invalidASN1 }
 
@@ -205,7 +238,12 @@ nonisolated enum PEMKeyParser {
         return length
     }
 
-    /// Read ASN.1 DER INTEGER, strip leading zero byte
+    /// 读取 ASN.1 DER `INTEGER` 字段并去除正数填充零字节。
+    /// - Parameters:
+    ///   - bytes: DER 原始字节序列。
+    ///   - offset: 当前读取偏移（会被推进）。
+    /// - Returns: 整数字段原始字节数据。
+    /// - Throws: 标签非法、长度异常或越界时抛出 `PEMParseError.invalidASN1`。
     private static func readDERInteger(_ bytes: [UInt8], _ offset: inout Int) throws -> Data {
         guard offset < bytes.count, bytes[offset] == 0x02 else {
             throw PEMParseError.invalidASN1
@@ -233,6 +271,9 @@ nonisolated enum PEMKeyParser {
 
     // MARK: - Hex Utilities
 
+    /// 将十六进制字符串转换为字节数组。
+    /// - Parameter hex: 十六进制文本。
+    /// - Returns: 成功时返回字节数组，失败返回 `nil`。
     private static func hexToBytes(_ hex: String) -> [UInt8]? {
         let hex = hex.trimmingCharacters(in: .whitespaces)
         guard hex.count % 2 == 0 else { return nil }
@@ -253,6 +294,7 @@ nonisolated enum PEMKeyParser {
 
 // MARK: - Errors
 
+/// PEMParseError：表示 PEM 读取、解密与 ASN.1 解析阶段的错误。
 nonisolated enum PEMParseError: LocalizedError {
     case invalidBase64
     case invalidASN1
@@ -261,6 +303,7 @@ nonisolated enum PEMParseError: LocalizedError {
     case unsupportedCipher(String)
     case unsupportedFormat
 
+    /// 适用于 UI 提示的本地化错误文案。
     var errorDescription: String? {
         switch self {
         case .invalidBase64: return String(localized: "Invalid base64 in PEM key")

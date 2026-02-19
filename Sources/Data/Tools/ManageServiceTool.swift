@@ -1,5 +1,9 @@
+/// 文件说明：ManageServiceTool，封装 systemd 服务查询与运维操作。
 import Foundation
 
+/// ManageServiceTool：
+/// 统一封装 `systemctl` 与 `journalctl` 常见操作，
+/// 对变更类动作（start/stop/restart/enable/disable）要求确认执行。
 struct ManageServiceTool: ToolProtocol {
     let name = "manage_service"
     let description = "Manage systemd services on the remote server. Can check status, view logs, start, stop, or restart services."
@@ -30,11 +34,19 @@ struct ManageServiceTool: ToolProtocol {
 
     private static let safeActions: Set<String> = ["status", "logs"]
 
+    /// 根据动作类型评估安全级别。
+    /// - Note: `status/logs` 属于只读；其余动作为状态变更。
     func validateSafety(arguments: [String: Any]) -> SafetyLevel {
         let action = arguments["action"] as? String ?? ""
         return Self.safeActions.contains(action) ? .safe : .needsConfirmation
     }
 
+    /// 执行服务管理动作并返回命令输出。
+    /// - Parameters:
+    ///   - arguments: 需包含 `service` 与 `action`。
+    ///   - sshClient: SSH 执行客户端。
+    /// - Returns: 服务状态、日志或执行结果文本。
+    /// - Throws: 参数缺失、动作非法或远端执行失败时抛出。
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult {
         guard let service = arguments["service"] as? String else {
             throw ToolError.missingParameter("service")

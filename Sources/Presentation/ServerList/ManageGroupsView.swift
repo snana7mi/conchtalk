@@ -1,5 +1,7 @@
+/// 文件说明：ManageGroupsView，负责服务器列表与分组管理界面。
 import SwiftUI
 
+/// ManageGroupsView：负责界面渲染与用户交互响应。
 struct ManageGroupsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var newGroupName = ""

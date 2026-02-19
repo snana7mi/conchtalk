@@ -1,3 +1,4 @@
+/// 文件说明：RSASHA2，提供基于 rsa-sha2-256/512 的 SSH 公钥认证与签名支持。
 import Foundation
 import CCryptoBoringSSL
 import NIOSSH
@@ -11,18 +12,25 @@ private nonisolated let kNID_sha512: CInt = 674
 
 // MARK: - Config Protocol (Phantom Type)
 
+/// RSASHA2Config：
+/// 通过泛型配置抽象算法差异（算法名、摘要 NID、摘要长度与哈希实现）。
 nonisolated protocol RSASHA2Config: Sendable {
     static var algorithmName: String { get }
     static var hashNID: CInt { get }
     static var hashLength: Int { get }
+    /// 计算待签名数据的哈希摘要。
+    /// - Parameter data: 原始数据字节。
+    /// - Returns: 摘要字节数组。
     static func computeHash(_ data: [UInt8]) -> [UInt8]
 }
 
+/// SHA256Config：定义 RSA-SHA2-256 签名所需的算法参数。
 nonisolated enum SHA256Config: RSASHA2Config {
     static let algorithmName = "rsa-sha2-256"
     static let hashNID: CInt = kNID_sha256
     static let hashLength = 32
 
+    /// computeHash：计算输入数据的哈希摘要。
     static func computeHash(_ data: [UInt8]) -> [UInt8] {
         var hash = [UInt8](repeating: 0, count: hashLength)
         data.withUnsafeBufferPointer { ptr in
@@ -32,11 +40,13 @@ nonisolated enum SHA256Config: RSASHA2Config {
     }
 }
 
+/// SHA512Config：定义 RSA-SHA2-512 签名所需的算法参数。
 nonisolated enum SHA512Config: RSASHA2Config {
     static let algorithmName = "rsa-sha2-512"
     static let hashNID: CInt = kNID_sha512
     static let hashLength = 64
 
+    /// computeHash：计算输入数据的哈希摘要。
     static func computeHash(_ data: [UInt8]) -> [UInt8] {
         var hash = [UInt8](repeating: 0, count: hashLength)
         data.withUnsafeBufferPointer { ptr in
@@ -48,8 +58,11 @@ nonisolated enum SHA512Config: RSASHA2Config {
 
 // MARK: - ByteBuffer SSH Helpers (file-private)
 
+/// ByteBuffer 扩展：提供 SSH 协议二进制编码/解码辅助方法。
 extension ByteBuffer {
-    /// Write bytes as SSH string (uint32 length + data).
+    /// 以 SSH `string` 格式写入字节（`uint32 length + payload`）。
+    /// - Parameter bytes: 待写入字节集合。
+    /// - Returns: 写入字节数。
     @discardableResult
     fileprivate nonisolated mutating func sshWriteBytes(_ bytes: some Collection<UInt8>) -> Int {
         var written = writeInteger(UInt32(bytes.count))
@@ -57,7 +70,9 @@ extension ByteBuffer {
         return written
     }
 
-    /// Write an integer as SSH mpint (big-endian, leading zero if high bit set).
+    /// 以 SSH `mpint` 格式写入大整数（必要时补前导零避免符号位误判）。
+    /// - Parameter bytes: 大整数大端字节。
+    /// - Returns: 写入字节数。
     @discardableResult
     fileprivate nonisolated mutating func sshWriteMPInt(_ bytes: [UInt8]) -> Int {
         if bytes.isEmpty || (bytes.count == 1 && bytes[0] == 0) {
@@ -81,7 +96,8 @@ extension ByteBuffer {
         return written
     }
 
-    /// Read SSH string and return raw bytes.
+    /// 按 SSH `string` 格式读取字节数据。
+    /// - Returns: 读取成功返回字节数组，否则返回 `nil`。
     fileprivate nonisolated mutating func sshReadBytes() -> [UInt8]? {
         guard let length = readInteger(as: UInt32.self),
               readableBytes >= length,
@@ -91,7 +107,8 @@ extension ByteBuffer {
         return bytes
     }
 
-    /// Read SSH mpint and return raw bytes (leading zero stripped).
+    /// 按 SSH `mpint` 格式读取大整数并去除符号填充零。
+    /// - Returns: 读取成功返回字节数组，否则返回 `nil`。
     fileprivate nonisolated mutating func sshReadMPInt() -> [UInt8]? {
         guard let length = readInteger(as: UInt32.self) else { return nil }
         if length == 0 { return [0] }
@@ -108,25 +125,33 @@ extension ByteBuffer {
 
 // MARK: - Signature
 
+/// RSASHA2Signature：RSA-SHA2 签名载荷封装，适配 `NIOSSHSignatureProtocol`。
 nonisolated struct RSASHA2Signature<Config: RSASHA2Config>: NIOSSHSignatureProtocol, Sendable {
     static var signaturePrefix: String { Config.algorithmName }
 
     let rawRepresentation: Data
 
+    /// 通过原始签名字节初始化签名对象。
+    /// - Parameter rawBytes: 签名字节。
     init(rawBytes: [UInt8]) {
         self.rawRepresentation = Data(rawBytes)
     }
 
+    /// 通过 `Data` 形式初始化签名对象。
+    /// - Parameter rawRepresentation: 签名数据。
     init(rawRepresentation: Data) {
         self.rawRepresentation = rawRepresentation
     }
 
     // NIOSSH writes signaturePrefix before calling this method.
+    /// 将签名写入 SSH 缓冲区（前缀由 NIOSSH 外层处理）。
     func write(to buffer: inout ByteBuffer) -> Int {
         buffer.sshWriteBytes(rawRepresentation)
     }
 
     // NIOSSH already consumed the signaturePrefix before calling this method.
+    /// 从 SSH 缓冲区读取签名载荷并构建签名对象。
+    /// - Throws: 载荷结构不合法时抛出 `RSASHA2Error.invalidSignature`。
     static func read(from buffer: inout ByteBuffer) throws -> Self {
         guard let bytes = buffer.sshReadBytes() else {
             throw RSASHA2Error.invalidSignature
@@ -137,6 +162,7 @@ nonisolated struct RSASHA2Signature<Config: RSASHA2Config>: NIOSSHSignatureProto
 
 // MARK: - Public Key
 
+/// RSASHA2PublicKey：RSA 公钥封装，适配 `NIOSSHPublicKeyProtocol` 验签流程。
 nonisolated struct RSASHA2PublicKey<Config: RSASHA2Config>: NIOSSHPublicKeyProtocol, Sendable {
     static var publicKeyPrefix: String { Config.algorithmName }
 
@@ -149,6 +175,11 @@ nonisolated struct RSASHA2PublicKey<Config: RSASHA2Config>: NIOSSHPublicKeyProto
         return Data(buffer.readableBytesView)
     }
 
+    /// 使用当前公钥校验签名有效性。
+    /// - Parameters:
+    ///   - signature: 待校验签名。
+    ///   - data: 原始数据。
+    /// - Returns: `true` 表示签名有效。
     func isValidSignature<D: DataProtocol>(_ signature: NIOSSHSignatureProtocol, for data: D) -> Bool {
         guard let sig = signature as? RSASHA2Signature<Config> else { return false }
 
@@ -177,6 +208,7 @@ nonisolated struct RSASHA2PublicKey<Config: RSASHA2Config>: NIOSSHPublicKeyProto
     }
 
     // NIOSSH writes publicKeyPrefix before calling this method.
+    /// 将公钥参数写入 SSH 缓冲区（前缀由 NIOSSH 外层处理）。
     func write(to buffer: inout ByteBuffer) -> Int {
         var written = 0
         written += buffer.sshWriteMPInt(eBytes)
@@ -185,6 +217,8 @@ nonisolated struct RSASHA2PublicKey<Config: RSASHA2Config>: NIOSSHPublicKeyProto
     }
 
     // NIOSSH already consumed the publicKeyPrefix before calling this method.
+    /// 从 SSH 缓冲区读取公钥参数并构建公钥对象。
+    /// - Throws: 公钥结构不合法时抛出 `RSASHA2Error.invalidKey`。
     static func read(from buffer: inout ByteBuffer) throws -> Self {
         guard let eBytes = buffer.sshReadMPInt(),
               let nBytes = buffer.sshReadMPInt() else {
@@ -196,6 +230,7 @@ nonisolated struct RSASHA2PublicKey<Config: RSASHA2Config>: NIOSSHPublicKeyProto
 
 // MARK: - Private Key
 
+/// RSASHA2PrivateKey：RSA 私钥封装，负责生成符合 SSH 协议的签名。
 nonisolated struct RSASHA2PrivateKey<Config: RSASHA2Config>: NIOSSHPrivateKeyProtocol, Sendable {
     static var keyPrefix: String { Config.algorithmName }
 
@@ -207,6 +242,10 @@ nonisolated struct RSASHA2PrivateKey<Config: RSASHA2Config>: NIOSSHPrivateKeyPro
         RSASHA2PublicKey<Config>(nBytes: nBytes, eBytes: eBytes)
     }
 
+    /// 对输入数据签名并返回 SSH 签名对象。
+    /// - Parameter data: 待签名数据。
+    /// - Returns: `NIOSSHSignatureProtocol` 签名实例。
+    /// - Throws: BIGNUM 构建、RSA 参数设置或签名失败时抛出。
     func signature<D: DataProtocol>(for data: D) throws -> NIOSSHSignatureProtocol {
         let dataArray = Array(data)
 
@@ -254,17 +293,24 @@ nonisolated struct RSASHA2PrivateKey<Config: RSASHA2Config>: NIOSSHPrivateKeyPro
 
 // MARK: - Custom Auth Delegate
 
-/// Offers public-key authentication with a custom NIOSSHPrivateKey.
+/// RSASHA2AuthDelegate：
+/// 为 NIOSSH 提供基于自定义私钥的公钥认证协商委托。
 nonisolated final class RSASHA2AuthDelegate: NIOSSHClientUserAuthenticationDelegate, @unchecked Sendable {
     private let username: String
     private let privateKey: NIOSSHPrivateKey
     private var offered = false
 
+    /// 初始化认证委托。
+    /// - Parameters:
+    ///   - username: 登录用户名。
+    ///   - privateKey: NIOSSH 私钥封装。
     init(username: String, privateKey: NIOSSHPrivateKey) {
         self.username = username
         self.privateKey = privateKey
     }
 
+    /// 根据服务端声明能力决定是否提交公钥认证请求。
+    /// - Note: 只会提交一次公钥 offer，后续调用返回 `nil`。
     func nextAuthenticationType(
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
@@ -286,10 +332,11 @@ nonisolated final class RSASHA2AuthDelegate: NIOSSHClientUserAuthenticationDeleg
 
 // MARK: - Public API
 
+/// RSASHA2：对外暴露 RSA-SHA2 算法注册与认证方法构建入口。
 nonisolated enum RSASHA2 {
 
-    /// Register rsa-sha2-256 and rsa-sha2-512 algorithms with NIOSSH.
-    /// Must be called before connecting. Thread-safe (idempotent).
+    /// 注册 `rsa-sha2-256` 与 `rsa-sha2-512` 算法到 NIOSSH。
+    /// - Note: 线程安全且幂等，建连前调用一次即可。
     static func register() {
         _ = Self._registered
     }
@@ -305,7 +352,13 @@ nonisolated enum RSASHA2 {
         )
     }()
 
-    /// Create an SSHAuthenticationMethod using rsa-sha2-256 signing.
+    /// 使用给定 RSA 参数构建 `rsa-sha2-256` 自定义认证方法。
+    /// - Parameters:
+    ///   - username: 登录用户名。
+    ///   - n: 模数字节。
+    ///   - e: 公钥指数。
+    ///   - d: 私钥指数。
+    /// - Returns: 可直接用于 Citadel 连接的认证方法。
     static func authMethod(username: String, n: [UInt8], e: [UInt8], d: [UInt8]) -> SSHAuthenticationMethod {
         let privateKey = RSASHA2PrivateKey<SHA256Config>(nBytes: n, eBytes: e, dBytes: d)
         let nioKey = NIOSSHPrivateKey(custom: privateKey)
@@ -313,7 +366,9 @@ nonisolated enum RSASHA2 {
         return .custom(delegate)
     }
 
-    /// Extract raw byte array from a BoringSSL BIGNUM pointer.
+    /// 将 BoringSSL `BIGNUM` 转换为大端字节数组。
+    /// - Parameter bn: BIGNUM 指针。
+    /// - Returns: 对应字节数组；空值回退为 `[0]`。
     static func bignumToBytes(_ bn: UnsafeMutablePointer<BIGNUM>) -> [UInt8] {
         let numBytes = Int(CCryptoBoringSSL_BN_num_bytes(bn))
         guard numBytes > 0 else { return [0] }
@@ -327,11 +382,13 @@ nonisolated enum RSASHA2 {
 
 // MARK: - Errors
 
+/// RSASHA2Error：表示 RSA-SHA2 编码、签名与验签过程中的错误。
 nonisolated enum RSASHA2Error: LocalizedError {
     case signingFailed
     case invalidKey
     case invalidSignature
 
+    /// 面向 UI 展示的本地化错误文案。
     var errorDescription: String? {
         switch self {
         case .signingFailed: return String(localized: "RSA SHA-2 signing failed")

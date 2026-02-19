@@ -35,7 +35,7 @@
 | `get_system_info` | CPU/内存/磁盘/OS 信息 | safe |
 | `get_process_list` | 进程列表（可过滤排序） | safe |
 | `get_network_status` | 网络接口/连接/端口 | safe |
-| `manage_service` | systemd 服务管理 | status/logs=safe, start/stop/restart=needsConfirmation |
+| `manage_service` | systemd 服务管理 | status/logs=safe, start/stop/restart/enable/disable=needsConfirmation |
 
 新增工具只需：实现 `ToolProtocol` → 在 `DependencyContainer` 中注册到 `ToolRegistry` → 自动出现在 AI 可用工具列表中。
 
@@ -74,6 +74,22 @@
 - **用户介入点** — 写操作触发确认弹框，用户拒绝后 AI 收到 `DENIED` 反馈并调整策略
 - **安全边界** — 危险命令被拦截后 AI 收到 `BLOCKED`，会尝试用安全方式达成目标
 - **防失控** — 最多 10 轮迭代，防止 AI 无限循环
+
+## 上下文压缩与网络容错（当前实现）
+
+### 上下文压缩策略
+
+- **触发阈值**：估算 token 使用量超过 `maxContextTokens` 的 95% 时启动压缩
+- **保留策略**：保留 `system prompt + 最近消息`，将更早消息折叠为一条摘要系统消息
+- **预算分配**：历史消息保留预算约为 `maxContextTokens * 0.70`，给模型回复留余量
+- **摘要复用**：若已有 `cachedSummary` 则优先复用，减少重复摘要请求
+
+### 网络重试与流式解析策略
+
+- **重试触发**：仅在 `URLError.networkConnectionLost`（`-1005`）时重试
+- **重试次数**：非流式与流式请求都默认重试 1 次
+- **重试间隔**：固定 500ms（当前未使用指数退避）
+- **流式容错**：SSE 中单条异常 chunk 会被跳过，整体流继续；致命错误通过 `.error` 事件返回并结束流
 
 ## 核心流程示例
 
@@ -141,6 +157,7 @@ Sources/
 
 - **多工具架构** — 可插拔的 ToolProtocol 体系，AI 自主选择最合适的工具，新增工具只需实现协议并注册
 - **流式输出 + 思维链** — SSE 实时接收 AI 响应；推理模型 (DeepSeek R1, o1/o3 等) 的思考过程实时展开，完成后自动折叠，点击可重新展开
+- **SSH 密钥兼容性** — 支持密码认证、OpenSSH Ed25519、传统 PEM RSA（含加密 PEM）和 OpenSSH RSA 回退路径
 - **中英双语** — 完整的 `Localizable.xcstrings` 字符串目录，跟随系统语言自动切换中/英文
 - **服务器分组** — 按分组管理服务器，支持创建/删除分组，新建服务器时可选择所属分组
 - **对话搜索** — 在服务器列表页下拉搜索，按对话标题和消息内容全文检索历史记录，点击结果直达对应对话

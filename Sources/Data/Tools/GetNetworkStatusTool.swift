@@ -1,5 +1,9 @@
+/// 文件说明：GetNetworkStatusTool，提供远端网络接口、连接与端口状态查询。
 import Foundation
 
+/// GetNetworkStatusTool：
+/// 聚合网络诊断常用命令（`ip/ifconfig/ss/netstat`），
+/// 支持按接口、连接、端口或全量信息查询。
 struct GetNetworkStatusTool: ToolProtocol {
     let name = "get_network_status"
     let description = "Get network status information from the remote server, including interfaces, connections, and ports."
@@ -20,10 +24,17 @@ struct GetNetworkStatusTool: ToolProtocol {
         "required": ["explanation"],
     ]
 
+    /// 网络状态查询属于只读操作，可直接执行。
     func validateSafety(arguments: [String: Any]) -> SafetyLevel {
         .safe
     }
 
+    /// 根据 `category` 构建网络诊断命令并返回输出。
+    /// - Parameters:
+    ///   - arguments: 可选 `category`（`interfaces/connections/ports/all`）。
+    ///   - sshClient: SSH 执行客户端。
+    /// - Returns: 网络状态文本输出。
+    /// - Throws: 远端命令执行失败时抛出。
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult {
         let category = arguments["category"] as? String ?? "all"
 

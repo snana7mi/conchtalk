@@ -1,23 +1,38 @@
+/// 文件说明：SwiftDataStore，统一封装 Server/Conversation/Group 的 SwiftData 持久化访问。
 import Foundation
 import SwiftData
 
+/// SwiftDataStore：
+/// 基于 `@ModelActor` 提供串行化数据访问边界，负责实体保存、查询、删除、分组与搜索。
 @ModelActor
 actor SwiftDataStore {
 
     // MARK: - Server Operations
 
+    /// 保存服务器配置。
+    /// - Parameter server: 待保存的服务器实体。
+    /// - Throws: SwiftData 写入失败时抛出。
+    /// - Side Effects: 向持久层插入一条新的 `ServerModel` 记录。
     func saveServer(_ server: Server) throws {
         let model = ServerModel.fromDomain(server)
         modelContext.insert(model)
         try modelContext.save()
     }
 
+    /// 获取全部服务器并按创建时间倒序返回。
+    /// - Returns: 服务器实体数组。
+    /// - Throws: SwiftData 查询失败时抛出。
     func fetchServers() throws -> [Server] {
         let descriptor = FetchDescriptor<ServerModel>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
         let models = try modelContext.fetch(descriptor)
         return models.map { $0.toDomain() }
     }
 
+    /// 删除指定服务器。
+    /// - Parameter serverID: 服务器标识。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note: 若目标不存在则静默返回，不抛出业务错误。
+    /// - Side Effects: 删除服务器后，其级联关联数据按模型关系规则处理。
     func deleteServer(_ serverID: UUID) throws {
         let predicate = #Predicate<ServerModel> { $0.id == serverID }
         let descriptor = FetchDescriptor(predicate: predicate)
@@ -27,6 +42,11 @@ actor SwiftDataStore {
         }
     }
 
+    /// 更新服务器基础字段。
+    /// - Parameter server: 包含最新字段值的服务器实体。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note: 若目标不存在则静默返回。
+    /// - Side Effects: 持久层中对应服务器记录会被原地更新。
     func updateServer(_ server: Server) throws {
         let predicate = #Predicate<ServerModel> { $0.id == server.id }
         let descriptor = FetchDescriptor(predicate: predicate)
@@ -47,23 +67,39 @@ actor SwiftDataStore {
 
     // MARK: - Conversation Operations
 
+    /// 保存会话记录。
+    /// - Parameter conversation: 待保存会话。
+    /// - Throws: SwiftData 写入失败时抛出。
+    /// - Side Effects: 向持久层插入一条新的 `ConversationModel`。
     func saveConversation(_ conversation: Conversation) throws {
         let model = ConversationModel(id: conversation.id, serverID: conversation.serverID, title: conversation.title, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt)
         modelContext.insert(model)
         try modelContext.save()
     }
 
+    /// 获取某台服务器下的会话列表。
+    /// - Parameter serverID: 服务器标识。
+    /// - Returns: 按更新时间倒序排列的会话集合。
+    /// - Throws: SwiftData 查询失败时抛出。
     func fetchConversations(forServer serverID: UUID) throws -> [Conversation] {
         let predicate = #Predicate<ConversationModel> { $0.serverID == serverID }
         let descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
         return try modelContext.fetch(descriptor).map { $0.toDomain() }
     }
 
+    /// 获取全量会话列表。
+    /// - Returns: 按更新时间倒序排列的会话集合。
+    /// - Throws: SwiftData 查询失败时抛出。
     func fetchAllConversations() throws -> [Conversation] {
         let descriptor = FetchDescriptor<ConversationModel>(sortBy: [SortDescriptor(\.updatedAt, order: .reverse)])
         return try modelContext.fetch(descriptor).map { $0.toDomain() }
     }
 
+    /// 删除指定会话。
+    /// - Parameter conversationID: 会话标识。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note: 若目标不存在则静默返回。
+    /// - Side Effects: 会话及其级联消息按关系删除规则处理。
     func deleteConversation(_ conversationID: UUID) throws {
         let predicate = #Predicate<ConversationModel> { $0.id == conversationID }
         let descriptor = FetchDescriptor(predicate: predicate)
@@ -73,6 +109,13 @@ actor SwiftDataStore {
         }
     }
 
+    /// 向会话追加消息并刷新会话更新时间。
+    /// - Parameters:
+    ///   - message: 待追加消息实体。
+    ///   - conversationID: 目标会话标识。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note: 若会话不存在则静默返回。
+    /// - Side Effects: 会写入新消息并更新 `conversation.updatedAt`。
     func addMessage(_ message: Message, toConversation conversationID: UUID) throws {
         let predicate = #Predicate<ConversationModel> { $0.id == conversationID }
         let descriptor = FetchDescriptor(predicate: predicate)
@@ -87,17 +130,29 @@ actor SwiftDataStore {
 
     // MARK: - Group Operations
 
+    /// 保存服务器分组。
+    /// - Parameter group: 待保存分组实体。
+    /// - Throws: SwiftData 写入失败时抛出。
+    /// - Side Effects: 向持久层插入一条新的 `ServerGroupModel`。
     func saveGroup(_ group: ServerGroup) throws {
         let model = ServerGroupModel.fromDomain(group)
         modelContext.insert(model)
         try modelContext.save()
     }
 
+    /// 获取全部服务器分组。
+    /// - Returns: 按排序权重与创建时间排序的分组集合。
+    /// - Throws: SwiftData 查询失败时抛出。
     func fetchGroups() throws -> [ServerGroup] {
         let descriptor = FetchDescriptor<ServerGroupModel>(sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.createdAt)])
         return try modelContext.fetch(descriptor).map { $0.toDomain() }
     }
 
+    /// 删除指定分组。
+    /// - Parameter groupID: 分组标识。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note: 若目标不存在则静默返回。
+    /// - Side Effects: 分组删除后，服务器侧关系按 `.nullify` 规则断开。
     func deleteGroup(_ groupID: UUID) throws {
         let predicate = #Predicate<ServerGroupModel> { $0.id == groupID }
         let descriptor = FetchDescriptor(predicate: predicate)
@@ -107,6 +162,11 @@ actor SwiftDataStore {
         }
     }
 
+    /// 更新分组字段。
+    /// - Parameter group: 含最新字段值的分组实体。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note: 若目标不存在则静默返回。
+    /// - Side Effects: 持久层中对应分组记录会被原地更新。
     func updateGroup(_ group: ServerGroup) throws {
         let predicate = #Predicate<ServerGroupModel> { $0.id == group.id }
         let descriptor = FetchDescriptor(predicate: predicate)
@@ -118,6 +178,15 @@ actor SwiftDataStore {
         }
     }
 
+    /// 调整服务器所属分组。
+    /// - Parameters:
+    ///   - serverID: 服务器标识。
+    ///   - groupID: 目标分组标识；传 `nil` 表示取消分组。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note:
+    ///   - 若服务器不存在则静默返回。
+    ///   - 当 `groupID` 指向不存在分组时，服务器分组会被置空。
+    /// - Side Effects: 会更新服务器与分组的关联关系。
     func assignServer(_ serverID: UUID, toGroup groupID: UUID?) throws {
         let serverPredicate = #Predicate<ServerModel> { $0.id == serverID }
         let serverDescriptor = FetchDescriptor(predicate: serverPredicate)
@@ -133,6 +202,9 @@ actor SwiftDataStore {
         try modelContext.save()
     }
 
+    /// 按分组聚合返回服务器列表。
+    /// - Returns: 元组数组；`group == nil` 表示未分组服务器集合。
+    /// - Throws: SwiftData 查询失败时抛出。
     func fetchServersGrouped() throws -> [(group: ServerGroup?, servers: [Server])] {
         let groupDescriptor = FetchDescriptor<ServerGroupModel>(sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.createdAt)])
         let groups = try modelContext.fetch(groupDescriptor)
@@ -160,6 +232,13 @@ actor SwiftDataStore {
 
     // MARK: - Search Operations
 
+    /// 按关键词搜索会话标题与消息正文。
+    /// - Parameter query: 搜索关键词。
+    /// - Returns: 去重后的命中结果，按会话更新时间倒序。
+    /// - Throws: SwiftData 查询失败时抛出。
+    /// - Note:
+    ///   - 先匹配会话标题，再补充消息正文命中。
+    ///   - 同一会话仅返回一条结果。
     func searchConversations(query: String) throws -> [ConversationSearchResult] {
         // Search by conversation title
         let titlePredicate = #Predicate<ConversationModel> { $0.title.localizedStandardContains(query) }
