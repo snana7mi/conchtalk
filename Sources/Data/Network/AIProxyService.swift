@@ -1,6 +1,38 @@
 /// 文件说明：AIProxyService，负责 OpenAI 请求编排、流式事件解析、重试与上下文压缩。
 import Foundation
 
+// MARK: - Provider Profile
+
+/// 协议适配层：将不同 LLM 供应商的 reasoning_content 规则显式化。
+private protocol ProviderProfile {
+    /// assistant + tool_calls 历史消息是否附带 reasoning_content。
+    var includeReasoningOnToolCallMessages: Bool { get }
+    /// 纯 assistant content 历史消息是否附带 reasoning_content。
+    var includeReasoningOnPlainAssistantMessages: Bool { get }
+}
+
+/// DeepSeek：只在 assistant + tool_calls 历史上带 reasoning_content。
+private struct DeepSeekProfile: ProviderProfile {
+    let includeReasoningOnToolCallMessages = true
+    let includeReasoningOnPlainAssistantMessages = false
+}
+
+/// OpenAI 及其他兼容服务：完全不传 reasoning_content。
+private struct DefaultProfile: ProviderProfile {
+    let includeReasoningOnToolCallMessages = false
+    let includeReasoningOnPlainAssistantMessages = false
+}
+
+/// 根据 baseURL / modelName 推断供应商 Profile。
+private func resolveProfile(baseURL: String, modelName: String) -> ProviderProfile {
+    let url = baseURL.lowercased()
+    let model = modelName.lowercased()
+    if url.contains("deepseek") || model.contains("deepseek") {
+        return DeepSeekProfile()
+    }
+    return DefaultProfile()
+}
+
 /// AIProxyService：
 /// `AIServiceProtocol` 的基础设施实现，统一处理消息协议转换、压缩决策、
 /// 非流式/流式调用与连接丢失重试，向上层提供稳定的 AI 调用语义。
@@ -25,36 +57,27 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
     // MARK: - AIServiceProtocol
 
-    /// 发送用户消息（非流式）并返回单次 AI 响应。
-    /// - Parameters:
-    ///   - message: 用户输入文本。
-    ///   - conversationHistory: 当前会话历史。
-    ///   - serverContext: 服务器上下文信息。
-    /// - Returns: 文本响应或工具调用响应。
-    /// - Throws: 配置缺失、网络失败、压缩失败或响应解析异常时抛出。
-    /// - Side Effects: 可能更新内部 `cachedSummary`（当触发上下文压缩时）。
     func sendMessage(_ message: String, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
         var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
         messages.append(["role": "user", "content": message])
         messages = try await compressIfNeeded(messages)
-        return try await callOpenAI(messages: messages)
+        return try await callOpenAIWithHealing(
+            messages: messages,
+            history: conversationHistory,
+            serverContext: serverContext,
+            tailMessage: ["role": "user", "content": message]
+        )
     }
 
-    /// 在工具执行后继续对话（非流式），让模型基于历史上下文生成下一步响应。
-    /// - Parameters:
-    ///   - result: 工具输出文本。
-    ///   - toolCall: 对应的工具调用信息。
-    ///   - conversationHistory: 当前会话历史。
-    ///   - serverContext: 服务器上下文信息。
-    /// - Returns: 文本响应或新的工具调用响应。
-    /// - Throws: 配置缺失、网络失败、压缩失败或响应解析异常时抛出。
-    /// - Note: 实际上下文来自 `conversationHistory` 内的 command/tool 记录，
-    ///   `result` 与 `toolCall` 主要用于与协议签名保持一致。
-    /// - Side Effects: 可能更新内部 `cachedSummary`。
     func sendToolResult(_ result: String, forToolCall toolCall: ToolCall, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
         var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
         messages = try await compressIfNeeded(messages)
-        return try await callOpenAI(messages: messages)
+        return try await callOpenAIWithHealing(
+            messages: messages,
+            history: conversationHistory,
+            serverContext: serverContext,
+            tailMessage: nil
+        )
     }
 
     // MARK: - Context Usage
@@ -97,12 +120,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
     // MARK: - OpenAI API
 
-    /// 调用 `/chat/completions`（非流式）并解析为 `AIResponse`。
-    /// - Parameter messages: OpenAI 协议格式的消息数组。
-    /// - Returns: 文本响应或工具调用响应。
-    /// - Throws: API Key 缺失、请求构建失败、HTTP 错误或响应结构不合法时抛出。
-    /// - Important: 当响应包含 `tool_calls` 时优先返回 `.toolCall`。
-    /// - Error Handling: 若工具调用参数不是合法 JSON，会降级为普通文本分支继续处理。
+    /// 发送非流式请求并解析响应。纯通道，不做自愈。
     private func callOpenAI(messages: [[String: Any]]) async throws -> AIResponse {
         let settings = AISettings.load()
         guard !settings.apiKey.isEmpty else {
@@ -131,10 +149,46 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
             throw AIServiceError.invalidResponse
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw AIServiceError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+            throw Self.parseAPIError(data: data, statusCode: httpResponse.statusCode)
         }
 
+        return try Self.parseResponse(data: data)
+    }
+
+    /// 自愈包装层：首次请求 400 且与 reasoning_content 相关时，翻转策略重试一次。
+    private func callOpenAIWithHealing(
+        messages: [[String: Any]],
+        history: [Message],
+        serverContext: String,
+        tailMessage: [String: Any]?
+    ) async throws -> AIResponse {
+        do {
+            return try await callOpenAI(messages: messages)
+        } catch let error as AIServiceError {
+            guard case .apiError(let code, let msg) = error, code == 400 else { throw error }
+
+            let hint = Self.reasoningHealingHint(from: msg)
+            guard let hint else { throw error }
+
+            print("[AIProxy] 400 self-healing: \(hint == .add ? "adding" : "removing") reasoning_content and retrying…")
+            let healProfile: ProviderProfile = (hint == .add) ? DeepSeekProfile() : DefaultProfile()
+            var retryMessages = buildOpenAIMessages(
+                from: history,
+                serverContext: serverContext,
+                profileOverride: healProfile
+            )
+            if let tail = tailMessage {
+                retryMessages.append(tail)
+            }
+            retryMessages = try await compressIfNeeded(retryMessages)
+            return try await callOpenAI(messages: retryMessages)
+        }
+    }
+
+    // MARK: - Response Parsing
+
+    /// 从 JSON data 解析出 AIResponse。
+    private static func parseResponse(data: Data) throws -> AIResponse {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let choice = choices.first,
@@ -142,7 +196,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
             throw AIServiceError.invalidResponse
         }
 
-        // Check for tool calls (generic — works for any registered tool)
+        // Check for tool calls
         if let toolCalls = message["tool_calls"] as? [[String: Any]],
            let firstToolCall = toolCalls.first,
            let toolCallID = firstToolCall["id"] as? String,
@@ -151,7 +205,6 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
            let argumentsString = function["arguments"] as? String,
            let argData = argumentsString.data(using: .utf8) {
 
-            // Extract explanation from arguments if present, otherwise use tool name
             let explanation: String
             if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
                let expl = args["explanation"] as? String {
@@ -188,7 +241,25 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                     var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
                     messages.append(["role": "user", "content": message])
                     messages = try await compressIfNeeded(messages)
-                    await callOpenAIStreaming(messages: messages, continuation: continuation)
+
+                    let healResult = await callOpenAIStreamingWithHealing(messages: messages)
+                    switch healResult {
+                    case .needsRetry(let hint):
+                        let healProfile: ProviderProfile = (hint == .add) ? DeepSeekProfile() : DefaultProfile()
+                        var retryMessages = buildOpenAIMessages(
+                            from: conversationHistory,
+                            serverContext: serverContext,
+                            profileOverride: healProfile
+                        )
+                        retryMessages.append(["role": "user", "content": message])
+                        retryMessages = try await compressIfNeeded(retryMessages)
+                        await callOpenAIStreaming(messages: retryMessages, continuation: continuation)
+                    case .stream(let bytes, let httpResponse):
+                        await processSSEStream(bytes: bytes, httpResponse: httpResponse, continuation: continuation)
+                    case .error(let error):
+                        continuation.yield(.error(error))
+                        continuation.finish()
+                    }
                 } catch {
                     continuation.yield(.error(error))
                     continuation.finish()
@@ -197,18 +268,30 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         }
     }
 
-    /// 流式提交工具输出并持续产出后续 `StreamingDelta`。
-    /// - Note: 实际上下文来自 `conversationHistory`，参数 `result/toolCall`
-    ///   主要用于与协议签名保持一致。
-    /// - Returns: 不抛错的 `AsyncStream`；错误通过 `.error` 事件传递。
-    /// - Side Effects: 可能更新内部 `cachedSummary`。
     func sendToolResultStreaming(_ result: String, forToolCall toolCall: ToolCall, conversationHistory: [Message], serverContext: String) -> AsyncStream<StreamingDelta> {
         AsyncStream { continuation in
             Task {
                 do {
                     var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
                     messages = try await compressIfNeeded(messages)
-                    await callOpenAIStreaming(messages: messages, continuation: continuation)
+
+                    let healResult = await callOpenAIStreamingWithHealing(messages: messages)
+                    switch healResult {
+                    case .needsRetry(let hint):
+                        let healProfile: ProviderProfile = (hint == .add) ? DeepSeekProfile() : DefaultProfile()
+                        var retryMessages = buildOpenAIMessages(
+                            from: conversationHistory,
+                            serverContext: serverContext,
+                            profileOverride: healProfile
+                        )
+                        retryMessages = try await compressIfNeeded(retryMessages)
+                        await callOpenAIStreaming(messages: retryMessages, continuation: continuation)
+                    case .stream(let bytes, let httpResponse):
+                        await processSSEStream(bytes: bytes, httpResponse: httpResponse, continuation: continuation)
+                    case .error(let error):
+                        continuation.yield(.error(error))
+                        continuation.finish()
+                    }
                 } catch {
                     continuation.yield(.error(error))
                     continuation.finish()
@@ -217,17 +300,80 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         }
     }
 
-    /// 执行流式请求并将 SSE 增量事件转换为 `StreamingDelta`。
-    /// - Parameters:
-    ///   - messages: OpenAI 协议格式消息。
-    ///   - continuation: `AsyncStream` continuation，用于回推增量结果。
-    /// - Note: 工具调用参数可能分片到多个 chunk，会在结束时组装为完整 `ToolCall`。
-    /// - Error Handling:
-    ///   - 请求构建、HTTP 状态异常、网络异常会产出 `.error` 并 `finish()`。
-    ///   - 单条 SSE 解析失败会被忽略，不中断整条流。
-    /// - Side Effects:
-    ///   - 按收到顺序触发 `reasoning/content/toolCall/done` 事件。
-    ///   - 对每次调用保证最多 `finish()` 一次。
+    // MARK: - Streaming Internals
+
+    /// 流式自愈预检结果。
+    private enum StreamingPreflightResult {
+        case stream(URLSession.AsyncBytes, HTTPURLResponse)
+        case needsRetry(ReasoningHealingHint)
+        case error(Error)
+    }
+
+    /// 构建流式请求并发起连接。400 且匹配 reasoning 错误时返回 `.needsRetry`。
+    private func callOpenAIStreamingWithHealing(messages: [[String: Any]]) async -> StreamingPreflightResult {
+        let settings = AISettings.load()
+        guard !settings.apiKey.isEmpty else {
+            return .error(AIServiceError.apiKeyMissing)
+        }
+
+        let baseURL = settings.baseURL.isEmpty ? "https://api.openai.com/v1" : settings.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(baseURL)/chat/completions") else {
+            return .error(AIServiceError.invalidResponse)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+
+        let body: [String: Any] = [
+            "model": settings.modelName,
+            "messages": messages,
+            "tools": toolRegistry.openAIToolDefinitions(),
+            "stream": true,
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            return .error(error)
+        }
+
+        do {
+            let (bytes, response) = try await bytesWithRetry(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                var errorBytes: [UInt8] = []
+                do {
+                    for try await byte in bytes {
+                        errorBytes.append(byte)
+                    }
+                } catch {
+                    print("[AIProxy] Failed to read streaming error body: \(error)")
+                }
+                let errorData = Data(errorBytes)
+                let apiError = Self.parseAPIError(data: errorData, statusCode: statusCode)
+
+                // 400 自愈：检查是否 reasoning_content 相关
+                if statusCode == 400,
+                   case .apiError(_, let msg) = apiError,
+                   let hint = Self.reasoningHealingHint(from: msg) {
+                    print("[AIProxy] Streaming 400 self-healing: \(hint == .add ? "adding" : "removing") reasoning_content and retrying…")
+                    return .needsRetry(hint)
+                }
+
+                return .error(apiError)
+            }
+
+            return .stream(bytes, httpResponse)
+        } catch {
+            return .error(error)
+        }
+    }
+
+    /// 不带自愈的直接流式调用（用于重试时的第二次请求）。
     private func callOpenAIStreaming(messages: [[String: Any]], continuation: AsyncStream<StreamingDelta>.Continuation) async {
         let settings = AISettings.load()
         guard !settings.apiKey.isEmpty else {
@@ -269,17 +415,41 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-                continuation.yield(.error(AIServiceError.apiError(statusCode: statusCode, message: "Streaming request failed")))
+                var errorBytes: [UInt8] = []
+                do {
+                    for try await byte in bytes {
+                        errorBytes.append(byte)
+                    }
+                } catch {
+                    print("[AIProxy] Failed to read streaming error body: \(error)")
+                }
+                let errorData = Data(errorBytes)
+                let apiError = Self.parseAPIError(data: errorData, statusCode: statusCode)
+                print("[AIProxy] Streaming retry failed (\(statusCode)): \(apiError.localizedDescription)")
+                continuation.yield(.error(apiError))
                 continuation.finish()
                 return
             }
 
-            // 跨 chunk 累积 tool_call 字段，结束时统一组装。
-            var toolCallID: String?
-            var toolCallName: String?
-            var toolCallArgs = ""
-            var hasToolCall = false
+            await processSSEStream(bytes: bytes, httpResponse: httpResponse, continuation: continuation)
+        } catch {
+            continuation.yield(.error(error))
+            continuation.finish()
+        }
+    }
 
+    /// 解析 SSE 流并 yield delta 事件。
+    private func processSSEStream(
+        bytes: URLSession.AsyncBytes,
+        httpResponse: HTTPURLResponse,
+        continuation: AsyncStream<StreamingDelta>.Continuation
+    ) async {
+        var toolCallID: String?
+        var toolCallName: String?
+        var toolCallArgs = ""
+        var hasToolCall = false
+
+        do {
             for try await line in bytes.lines {
                 guard line.hasPrefix("data: ") else { continue }
                 let payload = String(line.dropFirst(6))
@@ -321,7 +491,6 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                 }
             }
 
-            // 若成功组装完整工具调用，则在流末尾补发 `.toolCall` 事件。
             if hasToolCall,
                let id = toolCallID,
                let name = toolCallName,
@@ -399,11 +568,16 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     /// - Parameters:
     ///   - history: 会话历史消息。
     ///   - serverContext: 服务器上下文信息。
+    ///   - profileOverride: 自愈重试时替换默认 provider profile。
     /// - Returns: 可直接用于 Chat Completions 的 `messages` 数组。
-    /// - Important: `command` 消息会拆成 assistant tool_call 与 tool 响应两条记录。
-    /// - Note: `system` 角色消息会被包裹为 user 文本以保留历史提示语义。
-    private func buildOpenAIMessages(from history: [Message], serverContext: String) -> [[String: Any]] {
+    private func buildOpenAIMessages(
+        from history: [Message],
+        serverContext: String,
+        profileOverride: ProviderProfile? = nil
+    ) -> [[String: Any]] {
         var openAIMessages: [[String: Any]] = []
+        let settings = AISettings.load()
+        let profile = profileOverride ?? resolveProfile(baseURL: settings.baseURL, modelName: settings.modelName)
 
         // System prompt
         openAIMessages.append([
@@ -416,13 +590,20 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
             case .user:
                 openAIMessages.append(["role": "user", "content": msg.content])
             case .assistant:
-                openAIMessages.append(["role": "assistant", "content": msg.content])
+                var assistantMessage: [String: Any] = [
+                    "role": "assistant",
+                    "content": msg.content,
+                ]
+                if profile.includeReasoningOnPlainAssistantMessages {
+                    assistantMessage["reasoning_content"] = msg.reasoningContent ?? ""
+                }
+                openAIMessages.append(assistantMessage)
             case .command:
                 if let toolCall = msg.toolCall {
                     let argsString = String(data: toolCall.argumentsJSON, encoding: .utf8) ?? "{}"
 
                     // Assistant message with tool call
-                    openAIMessages.append([
+                    var assistantToolCallMessage: [String: Any] = [
                         "role": "assistant",
                         "content": NSNull(),
                         "tool_calls": [
@@ -435,7 +616,11 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                                 ] as [String: Any],
                             ] as [String: Any],
                         ],
-                    ])
+                    ]
+                    if profile.includeReasoningOnToolCallMessages {
+                        assistantToolCallMessage["reasoning_content"] = msg.reasoningContent ?? ""
+                    }
+                    openAIMessages.append(assistantToolCallMessage)
 
                     // Tool response
                     openAIMessages.append([
@@ -486,6 +671,38 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         10. Keep explanations concise but informative
         11. Always match the user's language (if they write in Chinese, respond in Chinese)
         """
+    }
+
+    // MARK: - Error Parsing & Self-Healing
+
+    /// 自愈方向：补 reasoning_content 还是去掉。
+    private enum ReasoningHealingHint {
+        case add, remove
+    }
+
+    /// 从 400 错误信息中判断是否可以通过翻转 reasoning_content 策略自愈。
+    private static func reasoningHealingHint(from message: String) -> ReasoningHealingHint? {
+        let lower = message.lowercased()
+        if lower.contains("missing") && lower.contains("reasoning_content") {
+            return .add
+        }
+        if lower.contains("reasoning_content") &&
+            (lower.contains("not allowed") || lower.contains("invalid") || lower.contains("unexpected")) {
+            return .remove
+        }
+        return nil
+    }
+
+    /// 从 API 错误响应中提取人类可读的错误信息。
+    /// 优先尝试解析 `{ "error": { "message": "..." } }` 结构。
+    private static func parseAPIError(data: Data, statusCode: Int) -> AIServiceError {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let errorObj = json["error"] as? [String: Any],
+           let message = errorObj["message"] as? String {
+            return .apiError(statusCode: statusCode, message: message)
+        }
+        let raw = String(data: data, encoding: .utf8) ?? "Unknown error"
+        return .apiError(statusCode: statusCode, message: raw)
     }
 }
 

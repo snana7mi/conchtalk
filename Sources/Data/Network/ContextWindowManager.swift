@@ -37,26 +37,37 @@ enum ContextWindowManager {
     /// 估算 OpenAI `messages` 数组总 token。
     /// - Parameter messages: OpenAI 协议消息数组。
     /// - Returns: 估算 token 总数。
-    /// - Note: 结果包含消息结构开销与 tool_calls JSON 开销。
+    /// - Note: 结果包含消息结构开销、tool_calls JSON 开销与 reasoning_content 开销。
     static func estimateTokens(for messages: [[String: Any]]) -> Int {
         var total = 0
         for msg in messages {
-            // Per-message overhead (role, formatting)
-            total += 4
-
-            if let content = msg["content"] as? String {
-                total += estimateTokens(for: content)
-            }
-
-            // tool_calls JSON
-            if let toolCalls = msg["tool_calls"] {
-                if let data = try? JSONSerialization.data(withJSONObject: toolCalls),
-                   let str = String(data: data, encoding: .utf8) {
-                    total += estimateTokens(for: str)
-                }
-            }
+            total += messageTokens(msg)
         }
         return total
+    }
+
+    /// 估算单条 OpenAI 协议消息的 token 数。
+    private static func messageTokens(_ msg: [String: Any]) -> Int {
+        var tokens = 4 // per-message overhead (role, formatting)
+
+        if let content = msg["content"] as? String {
+            tokens += estimateTokens(for: content)
+        }
+
+        // tool_calls JSON
+        if let toolCalls = msg["tool_calls"] {
+            if let data = try? JSONSerialization.data(withJSONObject: toolCalls),
+               let str = String(data: data, encoding: .utf8) {
+                tokens += estimateTokens(for: str)
+            }
+        }
+
+        // reasoning_content (DeepSeek R1, etc.)
+        if let reasoning = msg["reasoning_content"] as? String, !reasoning.isEmpty {
+            tokens += estimateTokens(for: reasoning)
+        }
+
+        return tokens
     }
 
     /// 估算上下文窗口占用比例。
@@ -144,17 +155,17 @@ enum ContextWindowManager {
         let budget = Int(Double(maxTokens) * 0.70)
         let systemTokens = 4 + estimateTokens(for: systemMessage["content"] as? String ?? "")
 
-        // 反向遍历，寻找可保留的“最近消息”切分点。
+        // 反向遍历，寻找可保留的"最近消息"切分点。
         var recentTokens = systemTokens
         var splitIndex = contentMessages.count
 
         for i in stride(from: contentMessages.count - 1, through: 0, by: -1) {
-            let msgTokens = 4 + estimateTokens(for: contentMessages[i]["content"] as? String ?? "")
-            if recentTokens + msgTokens > budget {
+            let msgTok = messageTokens(contentMessages[i])
+            if recentTokens + msgTok > budget {
                 splitIndex = i + 1
                 break
             }
-            recentTokens += msgTokens
+            recentTokens += msgTok
             if i == 0 { splitIndex = 0 }
         }
 
