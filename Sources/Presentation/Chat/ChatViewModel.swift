@@ -256,33 +256,42 @@ final class ChatViewModel {
 
     // MARK: - 会话标题自动生成
 
-    /// 根据首条用户消息自动生成会话标题，仅在标题仍为默认值时触发一次。
-    /// - Note: 采用截取用户首句内容的策略，不消耗额外 AI Token。
-    /// - Important: 需要 `SwiftDataStore` 提供 `updateConversationTitle(_:title:)` 方法来持久化标题。
-    ///   若该方法尚未实现，标题仅在内存中更新，重启后回退为默认值。
+    /// 调用 AI 根据对话内容自动生成简短的会话标题，仅在标题仍为默认值时触发一次。
+    /// - Note: AI 生成失败时降级为截取首条用户消息。fallback 持久化成功后才锁定状态，确保失败可重试。
     private func generateConversationTitle() async {
         guard !titleGenerated else { return }
         guard let firstUserMsg = messages.first(where: { $0.role == .user }) else { return }
 
-        let content = firstUserMsg.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else { return }
+        let firstContent = firstUserMsg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !firstContent.isEmpty else { return }
 
-        // 取首条用户消息前 25 个字符作为标题，超长则追加省略号。
-        let title: String
-        if content.count > 25 {
-            title = String(content.prefix(25)) + "..."
-        } else {
-            title = content
+        // 先用截取策略作为即时标题
+        let fallbackTitle = firstContent.count > 20
+            ? String(firstContent.prefix(20)) + "..."
+            : firstContent
+
+        // 只有 fallback 持久化成功后才锁定，避免写入失败时永不重试
+        do {
+            try await store.updateConversationTitle(conversationID, title: fallbackTitle)
+            titleGenerated = true
+        } catch {
+            print("[ChatVM] Failed to persist fallback title, will retry next message: \(error)")
+            return
         }
 
-        titleGenerated = true
-
-        // TODO: 需要在 SwiftDataStore 中添加 updateConversationTitle(_:title:) 方法，示例签名：
-        // func updateConversationTitle(_ conversationID: UUID, title: String) throws
-        do {
-            try await store.updateConversationTitle(conversationID, title: title)
-        } catch {
-            print("[ChatVM] Failed to persist conversation title: \(error)")
+        // 异步调用 AI 生成更精准的标题（失败不影响已有 fallback）
+        Task.detached { [aiService, store, conversationID, messages] in
+            do {
+                let aiTitle = try await aiService.generateTitle(for: messages)
+                guard !aiTitle.isEmpty else { return }
+                let finalTitle = aiTitle.count > 30
+                    ? String(aiTitle.prefix(30)) + "..."
+                    : aiTitle
+                try await store.updateConversationTitle(conversationID, title: finalTitle)
+                print("[ChatVM] AI generated title: \(finalTitle)")
+            } catch {
+                print("[ChatVM] AI title generation failed, keeping fallback: \(error)")
+            }
         }
     }
 

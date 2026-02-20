@@ -164,6 +164,70 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         }
     }
 
+    // MARK: - Title Generation
+
+    /// 使用轻量级非流式请求，根据对话前几条消息生成简短会话标题。
+    func generateTitle(for messages: [Message]) async throws -> String {
+        let settings = AISettings.load(keychainService: keychainService)
+        guard !settings.apiKey.isEmpty else { throw AIServiceError.apiKeyMissing }
+
+        let baseURL = settings.baseURL.isEmpty
+            ? "https://api.openai.com/v1"
+            : settings.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(baseURL)/chat/completions") else {
+            throw AIServiceError.invalidResponse
+        }
+
+        // 只取前 6 条非加载消息，控制 token 消耗
+        let sample = messages.filter { !$0.isLoading }.prefix(6)
+        var openAIMessages: [[String: Any]] = [
+            ["role": "system", "content": "Generate a concise title (max 20 characters) for the following conversation. Reply with ONLY the title, no quotes, no punctuation, no explanation. Use the same language as the user."],
+        ]
+        for msg in sample {
+            switch msg.role {
+            case .user:
+                openAIMessages.append(["role": "user", "content": msg.content])
+            case .assistant:
+                // 只取前 200 字符，避免过长
+                let truncated = String(msg.content.prefix(200))
+                openAIMessages.append(["role": "assistant", "content": truncated])
+            default:
+                break
+            }
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        let body: [String: Any] = [
+            "model": settings.modelName,
+            "messages": openAIMessages,
+            "max_tokens": 30,
+            "temperature": 0.3,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw Self.parseAPIError(data: data, statusCode: statusCode)
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let first = choices.first,
+              let message = first["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            throw AIServiceError.invalidResponse
+        }
+
+        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Streaming Internals
 
     /// 流式自愈预检结果。

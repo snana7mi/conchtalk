@@ -35,4 +35,10 @@ protocol AIServiceProtocol: Sendable {
     ///   - serverContext: 服务器上下文信息。
     /// - Returns: 占用比例（`0...1`）。
     func estimateContextUsage(history: [Message], serverContext: String) -> Double
+
+    /// 根据对话内容生成简短的会话标题。
+    /// - Parameter messages: 会话消息（取前几条即可）。
+    /// - Returns: AI 生成的简短标题字符串。
+    /// - Throws: 网络或解析异常。
+    func generateTitle(for messages: [Message]) async throws -> String
 }
