@@ -32,6 +32,27 @@ protocol SSHClientProtocol: Sendable {
     /// 当前连接状态。
     /// - Returns: `true` 表示可用连接已建立。
     var isConnected: Bool { get async }
+
+    // MARK: - SFTP
+
+    /// 通过 SFTP 读取远端文件内容。
+    /// - Parameter path: 远端文件绝对路径。
+    /// - Returns: 文件二进制内容。
+    /// - Throws: 文件不存在、权限不足或 SFTP 通道失败时抛出。
+    func sftpReadFile(path: String) async throws -> Data
+
+    /// 通过 SFTP 将数据写入远端文件。
+    /// - Parameters:
+    ///   - path: 远端文件绝对路径。
+    ///   - data: 待写入的二进制数据。
+    /// - Throws: 路径不可写、权限不足或 SFTP 通道失败时抛出。
+    func sftpWriteFile(path: String, data: Data) async throws
+
+    /// 通过 SFTP 获取远端文件大小（字节）。
+    /// - Parameter path: 远端文件绝对路径。
+    /// - Returns: 文件大小（字节数）。
+    /// - Throws: 文件不存在或 SFTP 通道失败时抛出。
+    func sftpFileSize(path: String) async throws -> UInt64
 }
 
 // MARK: - Default Implementations
@@ -55,5 +76,18 @@ extension SSHClientProtocol {
                 }
             }
         }
+    }
+
+    /// SFTP 默认实现：不支持时抛出错误。
+    func sftpReadFile(path: String) async throws -> Data {
+        throw SSHError.commandFailed("SFTP not supported")
+    }
+
+    func sftpWriteFile(path: String, data: Data) async throws {
+        throw SSHError.commandFailed("SFTP not supported")
+    }
+
+    func sftpFileSize(path: String) async throws -> UInt64 {
+        throw SSHError.commandFailed("SFTP not supported")
     }
 }

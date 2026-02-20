@@ -213,6 +213,53 @@ actor NIOSSHClient: SSHClientProtocol {
         }
     }
 
+    // MARK: - SFTP
+
+    /// 通过 SFTP 读取远端文件内容。
+    func sftpReadFile(path: String) async throws -> Data {
+        guard _isConnected, let client else {
+            throw SSHError.notConnected
+        }
+
+        return try await client.withSFTP { sftp in
+            let data = try await sftp.withFile(filePath: path, flags: .read) { file in
+                try await file.readAll()
+            }
+            return Data(buffer: data)
+        }
+    }
+
+    /// 通过 SFTP 将数据写入远端文件。
+    func sftpWriteFile(path: String, data: Data) async throws {
+        guard _isConnected, let client else {
+            throw SSHError.notConnected
+        }
+
+        try await client.withSFTP { sftp in
+            try await sftp.withFile(
+                filePath: path,
+                flags: [.write, .create, .truncate]
+            ) { file in
+                try await file.write(ByteBuffer(data: data))
+            }
+        }
+    }
+
+    /// 通过 SFTP 获取远端文件大小（字节）。
+    func sftpFileSize(path: String) async throws -> UInt64 {
+        guard _isConnected, let client else {
+            throw SSHError.notConnected
+        }
+
+        return try await client.withSFTP { sftp in
+            let attributes = try await sftp.getAttributes(at: path)
+            guard let size = attributes.size else {
+                throw SSHError.commandFailed("Unable to get file size")
+            }
+            return size
+        }
+    }
+
     // MARK: - Keep-Alive
 
     /// 启动连接保活定时器（每 30 秒执行一次轻量探测命令）。

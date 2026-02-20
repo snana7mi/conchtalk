@@ -33,29 +33,31 @@ struct SFTPReadFileTool: ToolProtocol {
         .safe
     }
 
-    /// 根据编码模式读取远端文件内容。
-    /// - 文本模式：先获取文件元信息（类型与大小），再读取全文。
+    /// 通过原生 SFTP 读取远端文件内容。
+    /// - 文本模式：尝试 UTF-8 解码，解码失败时自动回退为 Base64。
     /// - Base64 模式：将文件二进制内容编码为 Base64 返回，适用于二进制文件。
     /// - Parameters:
     ///   - arguments: 需包含 `path`，可选 `encoding`（默认 `"text"`）。
     ///   - sshClient: SSH 执行客户端。
     /// - Returns: 文件内容（纯文本或 Base64 编码）。
-    /// - Throws: 参数缺失或远端读取失败时抛出。
+    /// - Throws: 参数缺失或 SFTP 读取失败时抛出。
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult {
         guard let path = arguments["path"] as? String else {
             throw ToolError.missingParameter("path")
         }
 
         let encoding = arguments["encoding"] as? String ?? "text"
-        let escapedPath = shellEscape(path)
+        let data = try await sshClient.sftpReadFile(path: path)
 
         if encoding == "base64" {
-            let output = try await sshClient.execute(command: "base64 < \(escapedPath)")
-            return ToolExecutionResult(output: "Base64 encoded content of \(path):\n\(output)")
+            return ToolExecutionResult(output: "Base64 encoded content of \(path) (\(data.count) bytes):\n\(data.base64EncodedString())")
         } else {
-            let info = try await sshClient.execute(command: "file \(escapedPath) && wc -c < \(escapedPath)")
-            let content = try await sshClient.execute(command: "cat \(escapedPath)")
-            return ToolExecutionResult(output: "File info: \(info)\n---\n\(content)")
+            if let text = String(data: data, encoding: .utf8) {
+                return ToolExecutionResult(output: "File: \(path) (\(data.count) bytes)\n---\n\(text)")
+            } else {
+                // Binary file — fall back to base64
+                return ToolExecutionResult(output: "Binary file \(path) (\(data.count) bytes), base64 encoded:\n\(data.base64EncodedString())")
+            }
         }
     }
 }

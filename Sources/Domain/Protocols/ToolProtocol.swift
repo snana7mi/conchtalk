@@ -28,4 +28,24 @@ protocol ToolProtocol: Sendable {
     /// - Returns: 工具执行结果（文本输出）。
     /// - Throws: 参数缺失、参数非法或远端执行失败时抛出。
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult
+
+    /// 是否支持流式执行（逐块返回输出）。
+    var supportsStreaming: Bool { get }
+
+    /// 以流式方式执行工具，逐块返回输出文本。
+    /// - Parameters:
+    ///   - arguments: 本次工具调用参数。
+    ///   - sshClient: 远端命令执行客户端。
+    /// - Returns: 异步抛出流；不支持流式时返回 `nil`。
+    func executeStreaming(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> AsyncThrowingStream<String, Error>?
+}
+
+// MARK: - Default Streaming Implementations
+
+extension ToolProtocol {
+    var supportsStreaming: Bool { false }
+
+    func executeStreaming(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> AsyncThrowingStream<String, Error>? {
+        nil
+    }
 }

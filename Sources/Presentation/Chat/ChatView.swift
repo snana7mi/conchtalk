@@ -53,7 +53,8 @@ struct ChatView: View {
                             if message.isLoading {
                                 MessageBubbleView(
                                     message: message,
-                                    liveContentText: viewModel.activeContentText.isEmpty ? nil : viewModel.activeContentText
+                                    liveContentText: viewModel.activeContentText.isEmpty ? nil : viewModel.activeContentText,
+                                    liveToolOutput: viewModel.liveToolOutput.isEmpty ? nil : viewModel.liveToolOutput
                                 )
                                 .id(message.id)
                             } else {
@@ -84,6 +85,11 @@ struct ChatView: View {
                     }
                 }
                 .onChange(of: viewModel.activeContentText) {
+                    if let lastMessage = viewModel.messages.last {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.liveToolOutput) {
                     if let lastMessage = viewModel.messages.last {
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
@@ -254,6 +260,9 @@ struct ChatView: View {
             let append = args?["append"] as? Bool ?? false
             let action = append ? "Append to" : "Write to"
             return "\(toolCall.explanation)\n\n\(action): \(path)"
+        case "sftp_write_file":
+            let path = args?["path"] as? String ?? ""
+            return "\(toolCall.explanation)\n\nWrite to: \(path)"
         case "manage_service":
             let service = args?["service"] as? String ?? ""
             let action = args?["action"] as? String ?? ""

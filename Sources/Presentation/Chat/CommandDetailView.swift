@@ -81,9 +81,9 @@ struct CommandDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
-        case "read_file", "write_file":
+        case "read_file", "write_file", "sftp_read_file", "sftp_write_file":
             if let path = args?["path"] as? String {
-                Label(path, systemImage: "doc.text")
+                Label(path, systemImage: toolCall.toolName.contains("write") ? "doc.text.fill" : "doc.text")
                     .font(Theme.commandFont)
                     .foregroundStyle(.secondary)
                     .padding(8)
@@ -157,8 +157,8 @@ struct CommandDetailView: View {
         guard let toolName = message.toolCall?.toolName else { return "terminal" }
         switch toolName {
         case "execute_ssh_command": return "terminal"
-        case "read_file": return "doc.text"
-        case "write_file": return "doc.text.fill"
+        case "read_file", "sftp_read_file": return "doc.text"
+        case "write_file", "sftp_write_file": return "doc.text.fill"
         case "list_directory": return "folder"
         case "get_system_info": return "cpu"
         case "get_process_list": return "list.bullet.rectangle"
@@ -176,7 +176,7 @@ struct CommandDetailView: View {
         case "execute_ssh_command":
             let isDestructive = args?["is_destructive"] as? Bool ?? false
             return isDestructive ? .orange : .green
-        case "write_file":
+        case "write_file", "sftp_write_file":
             return .orange
         case "manage_service":
             let action = args?["action"] as? String ?? ""

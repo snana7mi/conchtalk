@@ -5,6 +5,7 @@ import SwiftUI
 struct MessageBubbleView: View {
     let message: Message
     var liveContentText: String? = nil
+    var liveToolOutput: String? = nil
 
     var body: some View {
         switch message.role {
@@ -38,7 +39,9 @@ struct MessageBubbleView: View {
             VStack(alignment: .leading, spacing: 6) {
                 if message.isLoading {
                     // Streaming state: thinking bubble shown separately in ChatView
-                    if let content = liveContentText, !content.isEmpty {
+                    if let toolOutput = liveToolOutput, !toolOutput.isEmpty {
+                        toolOutputView(toolOutput)
+                    } else if let content = liveContentText, !content.isEmpty {
                         Text(content)
                             .font(Theme.messageFont)
                             .padding(Theme.bubblePadding)
@@ -58,6 +61,25 @@ struct MessageBubbleView: View {
             }
             Spacer(minLength: 60)
         }
+    }
+
+    /// 工具执行过程中的实时输出视图（终端风格）。
+    private func toolOutputView(_ output: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "terminal")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ScrollView {
+                Text(output)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 200)
+        }
+        .padding(Theme.bubblePadding)
+        .background(Color.primary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleCornerRadius))
     }
 
     private var loadingDots: some View {

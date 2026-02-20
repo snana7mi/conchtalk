@@ -113,11 +113,11 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
 
                 switch safetyLevel {
                 case .safe:
-                    // 安全分支：直接执行工具。
+                    // 安全分支：直接执行工具（支持流式输出）。
                     onToolOutputUpdate?("")  // 重置实时输出
                     let result: ToolExecutionResult
                     do {
-                        result = try await tool.execute(arguments: arguments, sshClient: sshClient)
+                        result = try await executeTool(tool, arguments: arguments)
                     } catch {
                         // 错误分支：工具执行失败，包装为 command 消息后回填模型继续推进。
                         print("[Tool] \(toolCall.toolName) execution error: \(error)")
@@ -133,8 +133,6 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                         )
                         continue
                     }
-                    // 工具执行完成后推送最终输出（当前为缓冲模式；未来接入 executeStreaming 后将逐块推送）。
-                    onToolOutputUpdate?(result.output)
                     let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output, reasoningContent: roundReasoning)
                     newMessages.append(cmdMsg)
                     history.append(cmdMsg)
@@ -152,7 +150,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                         onToolOutputUpdate?("")  // 重置实时输出
                         let result: ToolExecutionResult
                         do {
-                            result = try await tool.execute(arguments: arguments, sshClient: sshClient)
+                            result = try await executeTool(tool, arguments: arguments)
                         } catch {
                             // 错误分支：已审批但执行失败，同样回填错误并继续。
                             print("[Tool] \(toolCall.toolName) execution error: \(error)")
@@ -168,8 +166,6 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                             )
                             continue
                         }
-                        // 工具执行完成后推送最终输出。
-                        onToolOutputUpdate?(result.output)
                         let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output, reasoningContent: roundReasoning)
                         newMessages.append(cmdMsg)
                         history.append(cmdMsg)
@@ -236,6 +232,67 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
             }
         }
         return newMessages
+    }
+
+    // MARK: - Tool Execution Helper
+
+    /// 流式执行的超时时间（秒），与缓冲模式 `execute(command:timeout:)` 对齐。
+    private static let streamingTimeout: TimeInterval = 30
+
+    /// 流式 UI 回调最小间隔（秒），避免高频 chunk 导致 SwiftUI 过度刷新。
+    private static let uiThrottleInterval: TimeInterval = 0.1
+
+    /// 执行工具，优先使用流式模式（若工具支持），否则回退到缓冲模式。
+    /// - 流式路径带 30s 超时保护，并对 UI 回调做节流（≥100ms/次）。
+    /// - Parameters:
+    ///   - tool: 待执行的工具实例。
+    ///   - arguments: 工具调用参数。
+    /// - Returns: 工具执行结果。
+    /// - Throws: 工具执行失败或超时时抛出。
+    /// - Side Effects: 通过 `onToolOutputUpdate` 实时推送执行输出。
+    private func executeTool(_ tool: ToolProtocol, arguments: [String: Any]) async throws -> ToolExecutionResult {
+        if tool.supportsStreaming,
+           let stream = try await tool.executeStreaming(arguments: arguments, sshClient: sshClient) {
+            return try await consumeStreamingWithTimeout(stream)
+        } else {
+            let result = try await tool.execute(arguments: arguments, sshClient: sshClient)
+            onToolOutputUpdate?(result.output)
+            return result
+        }
+    }
+
+    /// 消费流式工具输出，附带超时守卫与 UI 节流。
+    private func consumeStreamingWithTimeout(_ stream: AsyncThrowingStream<String, Error>) async throws -> ToolExecutionResult {
+        try await withThrowingTaskGroup(of: ToolExecutionResult.self) { group in
+            // 任务 1：消费流式输出（带节流）
+            group.addTask { [onToolOutputUpdate] in
+                var accumulated = ""
+                var lastUpdateTime: ContinuousClock.Instant = .now - .seconds(1) // 确保首次立即推送
+                for try await chunk in stream {
+                    accumulated += chunk
+                    let now = ContinuousClock.Instant.now
+                    if now - lastUpdateTime >= .milliseconds(100) {
+                        await onToolOutputUpdate?(accumulated)
+                        lastUpdateTime = now
+                    }
+                }
+                // 流结束后推送最终完整输出
+                await onToolOutputUpdate?(accumulated)
+                return ToolExecutionResult(output: accumulated)
+            }
+
+            // 任务 2：超时守卫
+            group.addTask {
+                try await Task.sleep(for: .seconds(Self.streamingTimeout))
+                throw SSHError.timeout
+            }
+
+            guard let result = try await group.next() else {
+                throw SSHError.commandFailed("No result")
+            }
+            group.cancelAll()
+            return result
+        }
     }
 
     // MARK: - Streaming Helper

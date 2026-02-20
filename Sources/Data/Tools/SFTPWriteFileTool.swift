@@ -42,15 +42,15 @@ struct SFTPWriteFileTool: ToolProtocol {
         .needsConfirmation
     }
 
-    /// 执行远端文件写入。
-    /// - 文本模式：通过 heredoc 传输纯文本内容。
+    /// 通过原生 SFTP 写入远端文件。
+    /// - 文本模式：将文本内容以 UTF-8 编码写入。
     /// - Base64 模式：将 Base64 编码内容解码后写入，适用于二进制文件。
-    /// - 可选在写入前备份原文件为 `.bak`。
+    /// - 可选在写入前通过 SFTP 备份原文件为 `.bak`。
     /// - Parameters:
     ///   - arguments: 需包含 `path`、`content`，可选 `encoding`（默认 `"text"`）、`create_backup`（默认 `false`）。
     ///   - sshClient: SSH 执行客户端。
     /// - Returns: 写入成功提示与文件大小验证信息。
-    /// - Throws: 参数缺失或远端执行失败时抛出。
+    /// - Throws: 参数缺失、编码失败或 SFTP 写入失败时抛出。
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult {
         guard let path = arguments["path"] as? String else {
             throw ToolError.missingParameter("path")
@@ -61,28 +61,31 @@ struct SFTPWriteFileTool: ToolProtocol {
 
         let encoding = arguments["encoding"] as? String ?? "text"
         let createBackup = arguments["create_backup"] as? Bool ?? false
-        let escapedPath = shellEscape(path)
 
-        // 如需备份，先复制原文件（忽略文件不存在的情况）。
+        // 如需备份，通过 SFTP 读取原文件并写为 .bak（忽略文件不存在的情况）。
         if createBackup {
-            _ = try? await sshClient.execute(command: "cp \(escapedPath) \(shellEscape(path + ".bak")) 2>/dev/null")
+            if let existingData = try? await sshClient.sftpReadFile(path: path) {
+                try? await sshClient.sftpWriteFile(path: path + ".bak", data: existingData)
+            }
         }
 
+        let writeData: Data
         if encoding == "base64" {
-            // 将 Base64 内容解码后写入目标文件。
-            let command = "echo \(shellEscape(content)) | base64 -d > \(escapedPath)"
-            let output = try await sshClient.execute(command: command)
-            let size = try await sshClient.execute(command: "wc -c < \(escapedPath)")
-            let result = output.isEmpty
-                ? "Written to \(path) successfully (base64 decoded, \(size.trimmingCharacters(in: .whitespacesAndNewlines)) bytes)"
-                : output
-            return ToolExecutionResult(output: result)
+            guard let decoded = Data(base64Encoded: content) else {
+                throw ToolError.invalidArguments("Invalid base64 encoding in content")
+            }
+            writeData = decoded
         } else {
-            // 使用 heredoc 传输纯文本内容，避免正文中引号导致命令拼接错误。
-            let command = "cat <<'CONCHTALK_EOF' > \(escapedPath)\n\(content)\nCONCHTALK_EOF"
-            let output = try await sshClient.execute(command: command)
-            let result = output.isEmpty ? "Written to \(path) successfully" : output
-            return ToolExecutionResult(output: result)
+            guard let textData = content.data(using: .utf8) else {
+                throw ToolError.invalidArguments("Unable to encode content as UTF-8")
+            }
+            writeData = textData
         }
+
+        try await sshClient.sftpWriteFile(path: path, data: writeData)
+
+        // 验证写入后的文件大小
+        let size = try await sshClient.sftpFileSize(path: path)
+        return ToolExecutionResult(output: "Written to \(path) successfully (\(size) bytes)")
     }
 }

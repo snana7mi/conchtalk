@@ -96,6 +96,8 @@ struct ExecuteSSHCommandTool: ToolProtocol {
         return .needsConfirmation
     }
 
+    var supportsStreaming: Bool { true }
+
     /// 在远端执行命令并返回标准化输出。
     /// - Parameters:
     ///   - arguments: 工具入参，需包含 `command`。
@@ -108,6 +110,20 @@ struct ExecuteSSHCommandTool: ToolProtocol {
         }
         let output = try await sshClient.execute(command: command)
         return ToolExecutionResult(output: output)
+    }
+
+    /// 以流式方式在远端执行命令，逐块返回输出。
+    /// 仅对需确认的命令（写操作/长耗时）启用流式；安全的只读短命令返回 `nil` 走缓冲模式，
+    /// 避免流式通道建立开销和 UI 逐块刷新。
+    func executeStreaming(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> AsyncThrowingStream<String, Error>? {
+        guard let command = arguments["command"] as? String else {
+            throw ToolError.missingParameter("command")
+        }
+        // 安全命令走缓冲模式
+        if validateSafety(arguments: arguments) == .safe {
+            return nil
+        }
+        return sshClient.executeStreaming(command: command)
     }
 
     /// 提取复合命令中的基准命令词（用于安全判定）。
