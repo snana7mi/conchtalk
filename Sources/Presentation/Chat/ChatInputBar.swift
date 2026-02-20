@@ -42,6 +42,7 @@ struct ChatInputBar: View {
                     .disabled(!isConnected)
                     .onSubmit {
                         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            isFocused = false
                             onSend()
                         }
                     }
@@ -58,7 +59,10 @@ struct ChatInputBar: View {
                             .foregroundStyle(.white)
                     }
                 } else {
-                    Button(action: onSend) {
+                    Button {
+                        isFocused = false
+                        onSend()
+                    } label: {
                         Image(systemName: "arrow.up")
                             .fontWeight(.semibold)
                             .frame(width: 32, height: 32)
