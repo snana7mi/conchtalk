@@ -5,8 +5,20 @@ import SwiftUI
 struct ChatView: View {
     @State var viewModel: ChatViewModel
 
+    /// 是否正在尝试自动重连。
+    @State private var isReconnecting = false
+
+    /// 标记是否曾经成功连接过（用于区分初始连接失败与断线）。
+    @State private var hasConnectedBefore = false
+
+    /// 健康检查任务是否处于活跃状态。
+    @State private var healthCheckActive = false
+
     var body: some View {
         VStack(spacing: 0) {
+            // 连接状态横幅
+            connectionBanner
+
             // Messages
             ScrollViewReader { proxy in
                 ScrollView {
@@ -101,13 +113,16 @@ struct ChatView: View {
                     Task {
                         if viewModel.isConnected {
                             await viewModel.disconnect()
+                            hasConnectedBefore = false
                         } else {
                             await viewModel.connect()
+                            if viewModel.isConnected {
+                                hasConnectedBefore = true
+                            }
                         }
                     }
                 } label: {
-                    Image(systemName: viewModel.isConnected ? "bolt.fill" : "bolt.slash")
-                        .foregroundStyle(viewModel.isConnected ? .green : .red)
+                    connectionToolbarIcon
                 }
             }
         }
@@ -122,8 +137,109 @@ struct ChatView: View {
         .task {
             await viewModel.loadMessages()
             await viewModel.connect()
+            if viewModel.isConnected {
+                hasConnectedBefore = true
+            }
+            healthCheckActive = true
+        }
+        .task(id: healthCheckActive) {
+            guard healthCheckActive else { return }
+            await runHealthCheck()
         }
     }
+
+    // MARK: - 连接状态横幅
+
+    /// 根据连接状态展示断线或重连中的提示横幅。
+    @ViewBuilder
+    private var connectionBanner: some View {
+        if isReconnecting {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("正在重连…")
+                    .font(.caption)
+                Spacer()
+            }
+            .padding(.horizontal, Theme.screenPadding)
+            .padding(.vertical, 6)
+            .background(Color.orange.opacity(0.12))
+            .foregroundStyle(.orange)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        } else if !viewModel.isConnected && hasConnectedBefore {
+            HStack(spacing: 6) {
+                Image(systemName: "wifi.slash")
+                    .font(.caption)
+                Text("连接已断开")
+                    .font(.caption)
+                Spacer()
+                Button {
+                    Task { await attemptReconnect() }
+                } label: {
+                    Text("重新连接")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+            }
+            .padding(.horizontal, Theme.screenPadding)
+            .padding(.vertical, 6)
+            .background(Color.red.opacity(0.12))
+            .foregroundStyle(.red)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    // MARK: - 工具栏连接图标
+
+    /// 根据连接状态显示不同颜色的闪电图标。
+    private var connectionToolbarIcon: some View {
+        Group {
+            if isReconnecting {
+                Image(systemName: "bolt.trianglebadge.exclamationmark")
+                    .foregroundStyle(.orange)
+            } else if viewModel.isConnected {
+                Image(systemName: "bolt.fill")
+                    .foregroundStyle(.green)
+            } else {
+                Image(systemName: "bolt.slash")
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    // MARK: - 自动重连
+
+    /// 尝试重新建立连接。
+    private func attemptReconnect() async {
+        guard !isReconnecting else { return }
+        withAnimation { isReconnecting = true }
+        await viewModel.connect()
+        withAnimation { isReconnecting = false }
+        if viewModel.isConnected {
+            hasConnectedBefore = true
+        }
+    }
+
+    // MARK: - 健康检查
+
+    /// 每 60 秒轮询一次连接状态，断开时自动尝试重连。
+    private func runHealthCheck() async {
+        while !Task.isCancelled && healthCheckActive {
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled && healthCheckActive else { break }
+
+            // 仅在本地标记「已连接」时检查底层真实状态
+            if viewModel.isConnected {
+                let reallyConnected = await viewModel.checkConnectionAlive()
+                if !reallyConnected {
+                    // 底层已断开，更新本地状态并尝试重连
+                    await attemptReconnect()
+                }
+            }
+        }
+    }
+
+    // MARK: - 确认弹窗文案
 
     /// confirmationMessage：生成待确认工具调用的展示文案。
     private func confirmationMessage(for toolCall: ToolCall) -> String {

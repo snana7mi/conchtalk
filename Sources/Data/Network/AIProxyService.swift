@@ -35,7 +35,7 @@ private func resolveProfile(baseURL: String, modelName: String) -> ProviderProfi
 
 /// AIProxyService：
 /// `AIServiceProtocol` 的基础设施实现，统一处理消息协议转换、压缩决策、
-/// 非流式/流式调用与连接丢失重试，向上层提供稳定的 AI 调用语义。
+/// 流式调用与连接丢失重试，向上层提供稳定的 AI 调用语义。
 final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     private let session: URLSession
     private let keychainService: KeychainServiceProtocol
@@ -44,7 +44,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
     /// 初始化 AI 服务客户端。
     /// - Parameters:
-    ///   - keychainService: 凭据服务（预留给后续扩展，当前主要使用本地设置中的 API Key）。
+    ///   - keychainService: 凭据服务，用于安全存储和读取 API Key。
     ///   - toolRegistry: 工具注册表，用于注入 `tools` 定义与系统提示词。
     /// - Side Effects: 创建带 120 秒请求超时的 `URLSession`。
     init(keychainService: KeychainServiceProtocol, toolRegistry: ToolRegistryProtocol) {
@@ -55,37 +55,12 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         self.toolRegistry = toolRegistry
     }
 
-    // MARK: - AIServiceProtocol
-
-    func sendMessage(_ message: String, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
-        var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
-        messages.append(["role": "user", "content": message])
-        messages = try await compressIfNeeded(messages)
-        return try await callOpenAIWithHealing(
-            messages: messages,
-            history: conversationHistory,
-            serverContext: serverContext,
-            tailMessage: ["role": "user", "content": message]
-        )
-    }
-
-    func sendToolResult(_ result: String, forToolCall toolCall: ToolCall, conversationHistory: [Message], serverContext: String) async throws -> AIResponse {
-        var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
-        messages = try await compressIfNeeded(messages)
-        return try await callOpenAIWithHealing(
-            messages: messages,
-            history: conversationHistory,
-            serverContext: serverContext,
-            tailMessage: nil
-        )
-    }
-
     // MARK: - Context Usage
 
     /// 估算当前历史消息占模型上下文窗口的比例（`0...1+`）。
     /// - Note: 为启发式估算结果，用于 UI 告警与压缩触发判断，不保证与服务端计费完全一致。
     func estimateContextUsage(history: [Message], serverContext: String) -> Double {
-        let settings = AISettings.load()
+        let settings = AISettings.load(keychainService: keychainService)
         let systemPrompt = Self.systemPrompt(serverContext: serverContext, tools: toolRegistry.tools)
         return ContextWindowManager.usagePercent(
             messages: history,
@@ -106,7 +81,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     ///   - 保留 system + 最近消息，把更早历史折叠为摘要系统消息。
     /// - Side Effects: 成功压缩后会刷新 `cachedSummary`。
     private func compressIfNeeded(_ messages: [[String: Any]]) async throws -> [[String: Any]] {
-        let settings = AISettings.load()
+        let settings = AISettings.load(keychainService: keychainService)
         let (compressed, summary) = try await ContextWindowManager.compress(
             messages: messages,
             maxTokens: settings.maxContextTokens,
@@ -116,117 +91,6 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         )
         cachedSummary = summary
         return compressed
-    }
-
-    // MARK: - OpenAI API
-
-    /// 发送非流式请求并解析响应。纯通道，不做自愈。
-    private func callOpenAI(messages: [[String: Any]]) async throws -> AIResponse {
-        let settings = AISettings.load()
-        guard !settings.apiKey.isEmpty else {
-            throw AIServiceError.apiKeyMissing
-        }
-
-        let baseURL = settings.baseURL.isEmpty ? "https://api.openai.com/v1" : settings.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let url = URL(string: "\(baseURL)/chat/completions")!
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
-
-        let body: [String: Any] = [
-            "model": settings.modelName,
-            "messages": messages,
-            "tools": toolRegistry.openAIToolDefinitions(),
-        ]
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await dataWithRetry(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AIServiceError.invalidResponse
-        }
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw Self.parseAPIError(data: data, statusCode: httpResponse.statusCode)
-        }
-
-        return try Self.parseResponse(data: data)
-    }
-
-    /// 自愈包装层：首次请求 400 且与 reasoning_content 相关时，翻转策略重试一次。
-    private func callOpenAIWithHealing(
-        messages: [[String: Any]],
-        history: [Message],
-        serverContext: String,
-        tailMessage: [String: Any]?
-    ) async throws -> AIResponse {
-        do {
-            return try await callOpenAI(messages: messages)
-        } catch let error as AIServiceError {
-            guard case .apiError(let code, let msg) = error, code == 400 else { throw error }
-
-            let hint = Self.reasoningHealingHint(from: msg)
-            guard let hint else { throw error }
-
-            print("[AIProxy] 400 self-healing: \(hint == .add ? "adding" : "removing") reasoning_content and retrying…")
-            let healProfile: ProviderProfile = (hint == .add) ? DeepSeekProfile() : DefaultProfile()
-            var retryMessages = buildOpenAIMessages(
-                from: history,
-                serverContext: serverContext,
-                profileOverride: healProfile
-            )
-            if let tail = tailMessage {
-                retryMessages.append(tail)
-            }
-            retryMessages = try await compressIfNeeded(retryMessages)
-            return try await callOpenAI(messages: retryMessages)
-        }
-    }
-
-    // MARK: - Response Parsing
-
-    /// 从 JSON data 解析出 AIResponse。
-    private static func parseResponse(data: Data) throws -> AIResponse {
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let choice = choices.first,
-              let message = choice["message"] as? [String: Any] else {
-            throw AIServiceError.invalidResponse
-        }
-
-        // Check for tool calls
-        if let toolCalls = message["tool_calls"] as? [[String: Any]],
-           let firstToolCall = toolCalls.first,
-           let toolCallID = firstToolCall["id"] as? String,
-           let function = firstToolCall["function"] as? [String: Any],
-           let name = function["name"] as? String,
-           let argumentsString = function["arguments"] as? String,
-           let argData = argumentsString.data(using: .utf8) {
-
-            let explanation: String
-            if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
-               let expl = args["explanation"] as? String {
-                explanation = expl
-            } else {
-                explanation = name
-            }
-
-            let toolCall = ToolCall(
-                id: toolCallID,
-                toolName: name,
-                argumentsJSON: argData,
-                explanation: explanation
-            )
-            let reasoning = message["reasoning_content"] as? String
-            return .toolCall(toolCall, reasoning: reasoning)
-        }
-
-        // Text response
-        let content = message["content"] as? String ?? ""
-        let reasoning = message["reasoning_content"] as? String
-        return .text(content, reasoning: reasoning)
     }
 
     // MARK: - Streaming API
@@ -311,7 +175,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
     /// 构建流式请求并发起连接。400 且匹配 reasoning 错误时返回 `.needsRetry`。
     private func callOpenAIStreamingWithHealing(messages: [[String: Any]]) async -> StreamingPreflightResult {
-        let settings = AISettings.load()
+        let settings = AISettings.load(keychainService: keychainService)
         guard !settings.apiKey.isEmpty else {
             return .error(AIServiceError.apiKeyMissing)
         }
@@ -375,7 +239,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
     /// 不带自愈的直接流式调用（用于重试时的第二次请求）。
     private func callOpenAIStreaming(messages: [[String: Any]], continuation: AsyncStream<StreamingDelta>.Continuation) async {
-        let settings = AISettings.load()
+        let settings = AISettings.load(keychainService: keychainService)
         guard !settings.apiKey.isEmpty else {
             continuation.yield(.error(AIServiceError.apiKeyMissing))
             continuation.finish()
@@ -438,16 +302,13 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         }
     }
 
-    /// 解析 SSE 流并 yield delta 事件。
+    /// 解析 SSE 流并 yield delta 事件，支持单次响应中包含多个 tool_calls。
     private func processSSEStream(
         bytes: URLSession.AsyncBytes,
         httpResponse: HTTPURLResponse,
         continuation: AsyncStream<StreamingDelta>.Continuation
     ) async {
-        var toolCallID: String?
-        var toolCallName: String?
-        var toolCallArgs = ""
-        var hasToolCall = false
+        var toolCalls: [(id: String?, name: String?, args: String)] = []
 
         do {
             for try await line in bytes.lines {
@@ -473,37 +334,44 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                     continuation.yield(.content(content))
                 }
 
-                // Tool calls (accumulated across chunks)
-                if let toolCalls = delta["tool_calls"] as? [[String: Any]],
-                   let tc = toolCalls.first {
-                    hasToolCall = true
-                    if let id = tc["id"] as? String {
-                        toolCallID = id
-                    }
-                    if let function = tc["function"] as? [String: Any] {
-                        if let name = function["name"] as? String {
-                            toolCallName = name
+                // Tool calls（按 index 累积，支持多个并行 tool call）
+                if let toolCallsArray = delta["tool_calls"] as? [[String: Any]] {
+                    for tc in toolCallsArray {
+                        let index = tc["index"] as? Int ?? 0
+                        // 确保数组长度足够容纳当前 index
+                        while toolCalls.count <= index {
+                            toolCalls.append((id: nil, name: nil, args: ""))
                         }
-                        if let args = function["arguments"] as? String {
-                            toolCallArgs += args
+                        if let id = tc["id"] as? String {
+                            toolCalls[index].id = id
+                        }
+                        if let function = tc["function"] as? [String: Any] {
+                            if let name = function["name"] as? String {
+                                toolCalls[index].name = name
+                            }
+                            if let args = function["arguments"] as? String {
+                                toolCalls[index].args += args
+                            }
                         }
                     }
                 }
             }
 
-            if hasToolCall,
-               let id = toolCallID,
-               let name = toolCallName,
-               let argData = toolCallArgs.data(using: .utf8) {
-                let explanation: String
-                if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
-                   let expl = args["explanation"] as? String {
-                    explanation = expl
-                } else {
-                    explanation = name
+            // 为每个完整的 tool call 生成独立的 .toolCall 事件
+            for tc in toolCalls {
+                if let id = tc.id,
+                   let name = tc.name,
+                   let argData = tc.args.data(using: .utf8) {
+                    let explanation: String
+                    if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
+                       let expl = args["explanation"] as? String {
+                        explanation = expl
+                    } else {
+                        explanation = name
+                    }
+                    let toolCall = ToolCall(id: id, toolName: name, argumentsJSON: argData, explanation: explanation)
+                    continuation.yield(.toolCall(toolCall))
                 }
-                let toolCall = ToolCall(id: id, toolName: name, argumentsJSON: argData, explanation: explanation)
-                continuation.yield(.toolCall(toolCall))
             }
 
             continuation.yield(.done)
@@ -515,29 +383,6 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     }
 
     // MARK: - Retry for Connection Lost (-1005)
-
-    /// 执行非流式请求，并在连接中断（`-1005`）时按固定策略重试。
-    /// - Parameters:
-    ///   - request: 已构建的 HTTP 请求。
-    ///   - maxRetries: 最大重试次数（默认 1）。
-    /// - Returns: 响应数据与响应头。
-    /// - Throws: 达到重试上限后抛出最后一次错误。
-    /// - Retry Policy:
-    ///   - 仅对 `URLError.networkConnectionLost` 重试。
-    ///   - 重试间隔固定 500ms，不做指数退避。
-    private func dataWithRetry(for request: URLRequest, maxRetries: Int = 1) async throws -> (Data, URLResponse) {
-        var lastError: Error?
-        for attempt in 0...maxRetries {
-            do {
-                return try await session.data(for: request)
-            } catch let error as URLError where error.code == .networkConnectionLost && attempt < maxRetries {
-                lastError = error
-                print("[AIProxy] Connection lost (-1005), retrying... (attempt \(attempt + 1))")
-                try? await Task.sleep(for: .milliseconds(500))
-            }
-        }
-        throw lastError!
-    }
 
     /// 执行流式请求，并在连接中断（`-1005`）时按固定策略重试。
     /// - Parameters:
@@ -576,7 +421,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         profileOverride: ProviderProfile? = nil
     ) -> [[String: Any]] {
         var openAIMessages: [[String: Any]] = []
-        let settings = AISettings.load()
+        let settings = AISettings.load(keychainService: keychainService)
         let profile = profileOverride ?? resolveProfile(baseURL: settings.baseURL, modelName: settings.modelName)
 
         // System prompt
@@ -708,7 +553,9 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
 // MARK: - AI Settings (stored in UserDefaults + Keychain)
 
-/// AISettings：封装 AI 相关本地配置（主要存于 `UserDefaults`）。
+/// AISettings：封装 AI 相关本地配置。
+/// - API Key 存储于 Keychain（安全存储），其余配置存于 `UserDefaults`。
+/// - 首次加载时自动将 UserDefaults 中的旧 API Key 迁移到 Keychain 并清除明文记录。
 struct AISettings {
     var apiKey: String
     var baseURL: String
@@ -717,24 +564,61 @@ struct AISettings {
 
     var maxContextTokens: Int { maxContextTokensK * 1000 }
 
-    /// 从本地配置读取 AI 参数。
+    /// 供无参调用使用的共享 KeychainService 实例（兼容 SettingsView 等无法注入依赖的场景）。
+    nonisolated(unsafe) static var sharedKeychainService: KeychainServiceProtocol = KeychainService()
+
+    /// 从本地配置读取 AI 参数，API Key 从 Keychain 读取。
+    /// - Parameter keychainService: Keychain 服务实例；为 `nil` 时使用共享实例。
     /// - Returns: 若未配置则返回包含默认值的设置对象。
-    static func load() -> AISettings {
+    static func load(keychainService: KeychainServiceProtocol? = nil) -> AISettings {
+        let keychain = keychainService ?? sharedKeychainService
         let defaults = UserDefaults.standard
         let storedK = defaults.integer(forKey: "aiMaxContextTokensK")
+
+        // 迁移：若 UserDefaults 中存在旧 API Key，迁移至 Keychain 并清除明文
+        var apiKey = ""
+        if let legacyKey = defaults.string(forKey: "aiAPIKey"), !legacyKey.isEmpty {
+            do {
+                try keychain.saveAPIKey(legacyKey)
+                defaults.removeObject(forKey: "aiAPIKey")
+                apiKey = legacyKey
+            } catch {
+                print("[AISettings] Failed to migrate API key to Keychain: \(error)")
+                apiKey = legacyKey
+            }
+        } else {
+            apiKey = (try? keychain.getAPIKey()) ?? ""
+        }
+
         return AISettings(
-            apiKey: defaults.string(forKey: "aiAPIKey") ?? "",
+            apiKey: apiKey,
             baseURL: defaults.string(forKey: "aiBaseURL") ?? "",
             modelName: defaults.string(forKey: "aiModelName") ?? "gpt-4o",
             maxContextTokensK: storedK > 0 ? storedK : 128
         )
     }
 
-    /// 将当前 AI 设置写入 `UserDefaults`。
+    /// 将当前 AI 设置持久化：API Key 写入 Keychain，其余写入 `UserDefaults`。
+    /// - Parameter keychainService: Keychain 服务实例；为 `nil` 时使用共享实例。
     /// - Side Effects: 覆盖同名键对应的历史配置值。
-    func save() {
+    func save(keychainService: KeychainServiceProtocol? = nil) {
+        let keychain = keychainService ?? Self.sharedKeychainService
         let defaults = UserDefaults.standard
-        defaults.set(apiKey, forKey: "aiAPIKey")
+
+        // API Key 存入 Keychain；仅在成功后才清除 UserDefaults 中的明文记录
+        do {
+            if apiKey.isEmpty {
+                try keychain.deleteAPIKey()
+            } else {
+                try keychain.saveAPIKey(apiKey)
+            }
+            // Keychain 写入成功，清除 UserDefaults 中可能残留的明文
+            defaults.removeObject(forKey: "aiAPIKey")
+        } catch {
+            print("[AISettings] Failed to save API key to Keychain: \(error)")
+            // Keychain 写失败时保留 UserDefaults 作为兜底，避免数据丢失
+        }
+
         defaults.set(baseURL, forKey: "aiBaseURL")
         defaults.set(modelName, forKey: "aiModelName")
         defaults.set(maxContextTokensK, forKey: "aiMaxContextTokensK")

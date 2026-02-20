@@ -20,6 +20,9 @@ final class ChatViewModel {
     var isStreaming: Bool = false
     var isReasoningActive: Bool = false
     var thinkingBubbleId: UUID = UUID()
+    /// 工具执行过程中的实时输出文本，供 UI 在加载气泡中展示命令执行进度。
+    /// - Note: 当前为缓冲模式（工具执行完成后一次性推送）；未来接入流式执行后将逐块更新。
+    var liveToolOutput: String = ""
 
     private var server: Server
     private var conversationID: UUID
@@ -30,6 +33,8 @@ final class ChatViewModel {
     private let keychainService: KeychainServiceProtocol
 
     private var commandContinuation: CheckedContinuation<ExecuteNaturalLanguageCommandUseCase.CommandApproval, Never>?
+    /// 标记会话标题是否已自动生成，避免每次发送消息重复生成。
+    private var titleGenerated: Bool = false
 
     /// 初始化聊天视图模型并注入业务依赖。
     /// - Parameters:
@@ -57,7 +62,8 @@ final class ChatViewModel {
     /// 基于当前消息历史估算上下文窗口占用比例。
     /// - Note: 会忽略 `isLoading` 的占位消息，仅统计真实对话内容。
     func updateContextUsage() {
-        let serverContext = "Host: \(server.host), User: \(server.username), OS: Linux"
+        let detectedOS = sshManager.getDetectedOS(for: server.id)
+        let serverContext = "Host: \(server.host), User: \(server.username), OS: \(detectedOS)"
         contextUsagePercent = aiService.estimateContextUsage(
             history: messages.filter { !$0.isLoading },
             serverContext: serverContext
@@ -71,6 +77,10 @@ final class ChatViewModel {
             let conversations = try await store.fetchConversations(forServer: server.id)
             if let existing = conversations.first(where: { $0.id == conversationID }) {
                 messages = existing.messages
+                // 已有非默认标题的会话无需再次生成标题。
+                if existing.title != "New Conversation" {
+                    titleGenerated = true
+                }
                 updateContextUsage()
             } else {
                 // Create new conversation
@@ -104,6 +114,16 @@ final class ChatViewModel {
             let errorMsg = Message(role: .system, content: String(localized: "Connection failed: \(error.localizedDescription)"))
             messages.append(errorMsg)
         }
+    }
+
+    /// 检查底层 SSH 连接是否仍然存活（不触发重连和 UI 消息）。
+    /// - Returns: `true` 表示底层连接仍可用；`false` 表示已断开。
+    func checkConnectionAlive() async -> Bool {
+        let alive = await sshManager.isConnected
+        if !alive {
+            isConnected = false
+        }
+        return alive
     }
 
     /// 主动断开 SSH 连接并更新本地连接状态。
@@ -145,7 +165,8 @@ final class ChatViewModel {
                 toolRegistry: toolRegistry
             )
 
-            let serverContext = "Host: \(server.host), User: \(server.username), OS: Linux"
+            let detectedOS = sshManager.getDetectedOS(for: server.id)
+            let serverContext = "Host: \(server.host), User: \(server.username), OS: \(detectedOS)"
 
             // Reset streaming state
             activeReasoningText = ""
@@ -171,6 +192,11 @@ final class ChatViewModel {
                 self.isReasoningActive = false
             }
 
+            useCase.onToolOutputUpdate = { [weak self] output in
+                guard let self else { return }
+                self.liveToolOutput = output
+            }
+
             useCase.onIntermediateMessage = { [weak self] message in
                 guard let self else { return }
                 // Remove loading indicator and add the real message
@@ -180,6 +206,8 @@ final class ChatViewModel {
                 self.activeContentText = ""
                 self.activeReasoningText = ""
                 self.isReasoningActive = false
+                // 工具执行完成，清除实时输出
+                self.liveToolOutput = ""
                 // Add new loading indicator if more processing expected
                 if message.role == .command {
                     self.isStreaming = true
@@ -206,6 +234,9 @@ final class ChatViewModel {
                 try? await store.addMessage(msg, toConversation: conversationID)
             }
 
+            // 首次 AI 回复后自动生成会话标题
+            await generateConversationTitle()
+
         } catch {
             print("[ChatVM] Error: \(error)")
             messages.removeAll { $0.isLoading }
@@ -218,8 +249,41 @@ final class ChatViewModel {
         isReasoningActive = false
         activeReasoningText = ""
         activeContentText = ""
+        liveToolOutput = ""
         isProcessing = false
         updateContextUsage()
+    }
+
+    // MARK: - 会话标题自动生成
+
+    /// 根据首条用户消息自动生成会话标题，仅在标题仍为默认值时触发一次。
+    /// - Note: 采用截取用户首句内容的策略，不消耗额外 AI Token。
+    /// - Important: 需要 `SwiftDataStore` 提供 `updateConversationTitle(_:title:)` 方法来持久化标题。
+    ///   若该方法尚未实现，标题仅在内存中更新，重启后回退为默认值。
+    private func generateConversationTitle() async {
+        guard !titleGenerated else { return }
+        guard let firstUserMsg = messages.first(where: { $0.role == .user }) else { return }
+
+        let content = firstUserMsg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+
+        // 取首条用户消息前 25 个字符作为标题，超长则追加省略号。
+        let title: String
+        if content.count > 25 {
+            title = String(content.prefix(25)) + "..."
+        } else {
+            title = content
+        }
+
+        titleGenerated = true
+
+        // TODO: 需要在 SwiftDataStore 中添加 updateConversationTitle(_:title:) 方法，示例签名：
+        // func updateConversationTitle(_ conversationID: UUID, title: String) throws
+        do {
+            try await store.updateConversationTitle(conversationID, title: title)
+        } catch {
+            print("[ChatVM] Failed to persist conversation title: \(error)")
+        }
     }
 
     /// 发起工具调用审批，并通过 continuation 挂起等待用户操作。
@@ -248,5 +312,25 @@ final class ChatViewModel {
         pendingToolCall = nil
         commandContinuation?.resume(returning: .denied)
         commandContinuation = nil
+    }
+}
+
+// MARK: - SwiftDataStore 会话标题更新扩展
+
+extension SwiftDataStore {
+    /// 更新指定会话的标题。
+    /// - Parameters:
+    ///   - conversationID: 目标会话标识。
+    ///   - title: 新标题。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    /// - Note: 若会话不存在则静默返回。
+    func updateConversationTitle(_ conversationID: UUID, title: String) throws {
+        let predicate = #Predicate<ConversationModel> { $0.id == conversationID }
+        let descriptor = FetchDescriptor(predicate: predicate)
+        if let conversation = try modelContext.fetch(descriptor).first {
+            conversation.title = title
+            conversation.updatedAt = Date()
+            try modelContext.save()
+        }
     }
 }

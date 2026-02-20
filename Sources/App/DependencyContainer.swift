@@ -44,6 +44,8 @@ final class DependencyContainer {
             GetProcessListTool(),
             GetNetworkStatusTool(),
             ManageServiceTool(),
+            SFTPReadFileTool(),
+            SFTPWriteFileTool(),
         ])
 
         // Services

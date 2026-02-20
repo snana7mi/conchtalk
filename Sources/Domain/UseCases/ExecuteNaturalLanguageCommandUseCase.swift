@@ -25,6 +25,9 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
     var onReasoningUpdate: (@MainActor @Sendable (String) -> Void)?
     /// 流式正文文本增量回调。
     var onContentUpdate: (@MainActor @Sendable (String) -> Void)?
+    /// 工具执行过程中实时输出回调（累积文本）。
+    /// - Note: 当工具支持流式执行时，每收到一块输出就会携带完整已累积文本回调，供 UI 实时展示。
+    var onToolOutputUpdate: (@MainActor @Sendable (String) -> Void)?
 
     /// 初始化用例并注入执行链路依赖。
     /// - Parameters:
@@ -83,12 +86,10 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                     history.append(errorMsg)
                     onIntermediateMessage?(errorMsg)
 
-                    response = try await sendWithStreaming { [history] in
-                        self.aiService.sendToolResultStreaming(
-                            "ERROR: Unknown tool '\(toolCall.toolName)'",
-                            forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                        )
-                    }
+                    response = try await nextResponseAfterToolResult(
+                        output: "ERROR: Unknown tool '\(toolCall.toolName)'",
+                        toolCall: toolCall, history: history, serverContext: serverContext
+                    )
                     continue
                 }
 
@@ -101,12 +102,10 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                     newMessages.append(errorMsg)
                     history.append(errorMsg)
 
-                    response = try await sendWithStreaming { [history] in
-                        self.aiService.sendToolResultStreaming(
-                            "ERROR: Invalid arguments",
-                            forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                        )
-                    }
+                    response = try await nextResponseAfterToolResult(
+                        output: "ERROR: Invalid arguments",
+                        toolCall: toolCall, history: history, serverContext: serverContext
+                    )
                     continue
                 }
 
@@ -115,6 +114,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                 switch safetyLevel {
                 case .safe:
                     // 安全分支：直接执行工具。
+                    onToolOutputUpdate?("")  // 重置实时输出
                     let result: ToolExecutionResult
                     do {
                         result = try await tool.execute(arguments: arguments, sshClient: sshClient)
@@ -122,34 +122,34 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                         // 错误分支：工具执行失败，包装为 command 消息后回填模型继续推进。
                         print("[Tool] \(toolCall.toolName) execution error: \(error)")
                         let errorOutput = "ERROR: \(error.localizedDescription)"
+                        onToolOutputUpdate?(errorOutput)
                         let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput, reasoningContent: roundReasoning)
                         newMessages.append(errorMsg)
                         history.append(errorMsg)
                         onIntermediateMessage?(errorMsg)
 
-                        response = try await sendWithStreaming { [history] in
-                            self.aiService.sendToolResultStreaming(
-                                errorOutput, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                            )
-                        }
+                        response = try await nextResponseAfterToolResult(
+                            output: errorOutput, toolCall: toolCall, history: history, serverContext: serverContext
+                        )
                         continue
                     }
+                    // 工具执行完成后推送最终输出（当前为缓冲模式；未来接入 executeStreaming 后将逐块推送）。
+                    onToolOutputUpdate?(result.output)
                     let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output, reasoningContent: roundReasoning)
                     newMessages.append(cmdMsg)
                     history.append(cmdMsg)
                     onIntermediateMessage?(cmdMsg)
 
-                    response = try await sendWithStreaming { [history] in
-                        self.aiService.sendToolResultStreaming(
-                            result.output, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                        )
-                    }
+                    response = try await nextResponseAfterToolResult(
+                        output: result.output, toolCall: toolCall, history: history, serverContext: serverContext
+                    )
 
                 case .needsConfirmation:
                     // 审批分支：等待调用方给出用户决策。
                     let approval = await onToolCallNeedsConfirmation?(toolCall) ?? .denied
 
                     if approval == .approved {
+                        onToolOutputUpdate?("")  // 重置实时输出
                         let result: ToolExecutionResult
                         do {
                             result = try await tool.execute(arguments: arguments, sshClient: sshClient)
@@ -157,40 +157,37 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                             // 错误分支：已审批但执行失败，同样回填错误并继续。
                             print("[Tool] \(toolCall.toolName) execution error: \(error)")
                             let errorOutput = "ERROR: \(error.localizedDescription)"
+                            onToolOutputUpdate?(errorOutput)
                             let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: errorOutput, reasoningContent: roundReasoning)
                             newMessages.append(errorMsg)
                             history.append(errorMsg)
                             onIntermediateMessage?(errorMsg)
 
-                            response = try await sendWithStreaming { [history] in
-                                self.aiService.sendToolResultStreaming(
-                                    errorOutput, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                                )
-                            }
+                            response = try await nextResponseAfterToolResult(
+                                output: errorOutput, toolCall: toolCall, history: history, serverContext: serverContext
+                            )
                             continue
                         }
+                        // 工具执行完成后推送最终输出。
+                        onToolOutputUpdate?(result.output)
                         let cmdMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: result.output, reasoningContent: roundReasoning)
                         newMessages.append(cmdMsg)
                         history.append(cmdMsg)
                         onIntermediateMessage?(cmdMsg)
 
-                        response = try await sendWithStreaming { [history] in
-                            self.aiService.sendToolResultStreaming(
-                                result.output, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                            )
-                        }
+                        response = try await nextResponseAfterToolResult(
+                            output: result.output, toolCall: toolCall, history: history, serverContext: serverContext
+                        )
                     } else {
                         // 拒绝分支：不执行工具，明确告知模型该调用被拒绝。
                         let deniedMsg = Message(role: .system, content: "Tool call denied by user: \(toolCall.toolName)")
                         newMessages.append(deniedMsg)
                         history.append(deniedMsg)
 
-                        response = try await sendWithStreaming { [history] in
-                            self.aiService.sendToolResultStreaming(
-                                "DENIED: User rejected this tool call",
-                                forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                            )
-                        }
+                        response = try await nextResponseAfterToolResult(
+                            output: "DENIED: User rejected this tool call",
+                            toolCall: toolCall, history: history, serverContext: serverContext
+                        )
                     }
 
                 case .forbidden:
@@ -200,12 +197,10 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                     history.append(blockedMsg)
                     onIntermediateMessage?(blockedMsg)
 
-                    response = try await sendWithStreaming { [history] in
-                        self.aiService.sendToolResultStreaming(
-                            "BLOCKED: This operation is forbidden for safety reasons",
-                            forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
-                        )
-                    }
+                    response = try await nextResponseAfterToolResult(
+                        output: "BLOCKED: This operation is forbidden for safety reasons",
+                        toolCall: toolCall, history: history, serverContext: serverContext
+                    )
                 }
             }
         }
@@ -250,12 +245,38 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
     /// - Returns: 聚合后的文本响应或工具调用响应。
     /// - Throws: 当流中收到 `.error` 事件时抛出对应错误。
     /// - Side Effects: 逐段触发 `onReasoningUpdate` / `onContentUpdate` 回调。
+    /// 待处理的剩余 tool call 队列（当模型一次返回多个 tool_calls 时使用）。
+    private var pendingToolCalls: [ToolCall] = []
+
+    /// 工具执行结果回填后决定下一步：若队列中还有待处理的 tool call 则直接返回，否则请求 AI。
+    /// - Parameters:
+    ///   - output: 刚执行完的工具输出文本。
+    ///   - toolCall: 对应的工具调用信息。
+    ///   - history: 当前完整会话历史。
+    ///   - serverContext: 服务器上下文。
+    /// - Returns: 下一个 tool call（队列非空时）或 AI 的新响应。
+    private func nextResponseAfterToolResult(
+        output: String,
+        toolCall: ToolCall,
+        history: [Message],
+        serverContext: String
+    ) async throws -> AIResponse {
+        if !pendingToolCalls.isEmpty {
+            return .toolCall(pendingToolCalls.removeFirst(), reasoning: nil)
+        }
+        return try await sendWithStreaming { [history] in
+            self.aiService.sendToolResultStreaming(
+                output, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext
+            )
+        }
+    }
+
     private func sendWithStreaming(_ streamFactory: @escaping @Sendable () -> AsyncStream<StreamingDelta>) async throws -> AIResponse {
         let stream = streamFactory()
 
         var accumulatedReasoning = ""
         var accumulatedContent = ""
-        var resultToolCall: ToolCall?
+        var resultToolCalls: [ToolCall] = []
 
         for await delta in stream {
             switch delta {
@@ -266,7 +287,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                 accumulatedContent += chunk
                 onContentUpdate?(chunk)
             case .toolCall(let toolCall):
-                resultToolCall = toolCall
+                resultToolCalls.append(toolCall)
             case .done:
                 break
             case .error(let error):
@@ -276,8 +297,10 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
 
         let reasoning: String? = accumulatedReasoning.isEmpty ? nil : accumulatedReasoning
 
-        if let toolCall = resultToolCall {
-            return .toolCall(toolCall, reasoning: reasoning)
+        if !resultToolCalls.isEmpty {
+            // 首个 tool call 立即返回，其余存入待处理队列
+            pendingToolCalls = Array(resultToolCalls.dropFirst())
+            return .toolCall(resultToolCalls[0], reasoning: reasoning)
         }
 
         return .text(accumulatedContent, reasoning: reasoning)

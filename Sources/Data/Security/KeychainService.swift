@@ -196,6 +196,70 @@ final class KeychainService: KeychainServiceProtocol, @unchecked Sendable {
             throw KeychainError.deleteFailed(status)
         }
     }
+
+    // MARK: - API Key
+
+    /// saveAPIKey：将 AI 服务 API Key 安全存储到 Keychain。
+    func saveAPIKey(_ key: String) throws {
+        guard let data = key.data(using: .utf8) else { throw KeychainError.encodingFailed }
+
+        let account = "\(servicePrefix).apikey"
+
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
+
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.saveFailed(status)
+        }
+    }
+
+    /// getAPIKey：从 Keychain 读取 AI 服务 API Key。
+    func getAPIKey() throws -> String? {
+        let account = "\(servicePrefix).apikey"
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainError.readFailed(status)
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// deleteAPIKey：从 Keychain 删除 AI 服务 API Key。
+    func deleteAPIKey() throws {
+        let account = "\(servicePrefix).apikey"
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+        ]
+
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.deleteFailed(status)
+        }
+    }
 }
 
 /// KeychainError：定义钥匙串读写过程中的错误类型。

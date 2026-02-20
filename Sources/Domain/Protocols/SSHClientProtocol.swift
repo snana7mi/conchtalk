@@ -17,12 +17,43 @@ protocol SSHClientProtocol: Sendable {
     func disconnect() async
 
     /// 在远端执行 Shell 命令。
-    /// - Parameter command: 待执行命令。
+    /// - Parameters:
+    ///   - command: 待执行命令。
+    ///   - timeout: 超时时间（秒），默认 30 秒。
     /// - Returns: 命令输出文本。
-    /// - Throws: 未连接、执行失败或通道异常时抛出。
-    func execute(command: String) async throws -> String
+    /// - Throws: 未连接、执行失败、超时或通道异常时抛出。
+    func execute(command: String, timeout: TimeInterval) async throws -> String
+
+    /// 以流式方式在远端执行 Shell 命令，逐块返回输出。
+    /// - Parameter command: 待执行命令。
+    /// - Returns: 异步抛出流，每个元素为一段输出文本。
+    func executeStreaming(command: String) -> AsyncThrowingStream<String, Error>
 
     /// 当前连接状态。
     /// - Returns: `true` 表示可用连接已建立。
     var isConnected: Bool { get async }
+}
+
+// MARK: - Default Implementations
+
+extension SSHClientProtocol {
+    /// 带默认超时的 `execute` 便捷调用（保持后向兼容）。
+    func execute(command: String) async throws -> String {
+        try await execute(command: command, timeout: 30)
+    }
+
+    /// `executeStreaming` 的默认实现：回退到非流式 `execute`，一次性返回全部输出。
+    func executeStreaming(command: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let result = try await self.execute(command: command)
+                    continuation.yield(result)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
 }
