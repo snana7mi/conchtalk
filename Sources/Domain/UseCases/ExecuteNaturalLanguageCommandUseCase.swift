@@ -187,16 +187,29 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
                     }
 
                 case .forbidden:
-                    // 禁止分支：命中安全策略，直接阻断并回填阻断原因。
-                    let blockedMsg = Message(role: .system, content: "Blocked dangerous tool call: \(toolCall.toolName)")
+                    // 禁止分支：命中安全策略，告知 AI 后由其生成拒绝回复，随后直接终止迭代。
+                    let commandDesc = arguments["command"] as? String ?? toolCall.toolName
+                    let blockedMsg = Message(role: .system, content: "BLOCKED: `\(commandDesc)` is a forbidden destructive command. You must refuse to execute it, explain why it is dangerous, and suggest the user run it manually via terminal if truly needed. Do NOT attempt alternative commands to achieve the same effect.")
                     newMessages.append(blockedMsg)
                     history.append(blockedMsg)
-                    onIntermediateMessage?(blockedMsg)
 
-                    response = try await nextResponseAfterToolResult(
-                        output: "BLOCKED: This operation is forbidden for safety reasons",
+                    var finalResponse = try await nextResponseAfterToolResult(
+                        output: "BLOCKED: This operation is forbidden for safety reasons. Explain to the user why and stop.",
                         toolCall: toolCall, history: history, serverContext: serverContext
                     )
+                    // AI 可能先返回更多 toolCall（多 tool 同轮），持续回填拒绝直到拿到文本回复。
+                    while case .toolCall(let pendingCall, _) = finalResponse {
+                        finalResponse = try await nextResponseAfterToolResult(
+                            output: "BLOCKED: All tool calls are terminated due to a prior safety violation.",
+                            toolCall: pendingCall, history: history, serverContext: serverContext
+                        )
+                    }
+                    if case .text(let text, let reasoning) = finalResponse {
+                        let assistantMsg = Message(role: .assistant, content: text, reasoningContent: reasoning)
+                        newMessages.append(assistantMsg)
+                        onIntermediateMessage?(assistantMsg)
+                    }
+                    return newMessages
                 }
             }
         }

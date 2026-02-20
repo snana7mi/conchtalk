@@ -39,9 +39,6 @@ struct ExecuteSSHCommandTool: ToolProtocol {
         #">\s*/dev/sd[a-z]"#,
         #"chmod\s+-R\s+777\s+/"#,
         #"chown\s+-R\s+.*\s+/$"#,
-        #"wget.*\|\s*sh"#,
-        #"curl.*\|\s*sh"#,
-        #"curl.*\|\s*bash"#,
     ]
 
     /// 常见只读/低风险命令白名单（用于自动放行判定）。
