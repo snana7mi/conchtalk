@@ -37,6 +37,10 @@ final class ChatViewModel {
     private var commandContinuation: CheckedContinuation<ExecuteNaturalLanguageCommandUseCase.CommandApproval, Never>?
     /// 标记会话标题是否已自动生成，避免每次发送消息重复生成。
     private var titleGenerated: Bool = false
+    /// 当前正在执行的 AI 请求任务句柄，用于中断生成。
+    private var currentTask: Task<Void, Never>?
+    /// 代际令牌：每次发送/中断递增，旧任务的回调若发现令牌不匹配则静默丢弃。
+    private var generationID = UUID()
 
     /// 初始化聊天视图模型并注入业务依赖。
     /// - Parameters:
@@ -140,21 +144,85 @@ final class ChatViewModel {
         messages.append(msg)
     }
 
-    /// 发送输入框内容并执行一轮完整的 AI Agent 流程（含工具调用与审批）。
-    /// - Important: 会修改 `messages`、`isProcessing`、`isStreaming`、`activeReasoningText` 等 UI 状态。
-    /// - Note: 过程中会把新增消息写入 `store`，结束后刷新上下文占用比例。
-    func sendMessage() async {
+    /// 启动发送消息的任务并保存句柄，以便支持中断。
+    func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isProcessing else { return }
 
         inputText = ""
+        let gen = UUID()
+        generationID = gen
+        currentTask = Task { [weak self] in
+            await self?.performSendMessage(text: text, generation: gen)
+        }
+    }
+
+    /// 中断当前正在进行的 AI 生成流程。
+    func stopGeneration() {
+        guard isProcessing, let task = currentTask else { return }
+
+        // 1. 令牌失效：旧任务的所有回调在下次触发时静默丢弃
+        generationID = UUID()
+
+        // 2. 协作取消
+        task.cancel()
+        currentTask = nil
+
+        // 3. 若有挂起的审批弹窗，先恢复 continuation 再清状态，避免 leak
+        if commandContinuation != nil {
+            commandContinuation?.resume(returning: .denied)
+            commandContinuation = nil
+            showConfirmation = false
+            pendingToolCall = nil
+        }
+
+        // 4. 清理 UI 状态
+        messages.removeAll { $0.isLoading }
+
+        // 如果已有部分流式内容，保留为一条不完整的 assistant 消息并持久化
+        let partialContent = activeContentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !partialContent.isEmpty {
+            let partialMsg = Message(
+                role: .assistant,
+                content: partialContent,
+                reasoningContent: activeReasoningText.isEmpty ? nil : activeReasoningText
+            )
+            messages.append(partialMsg)
+            Task { [store, conversationID] in
+                do {
+                    try await store.addMessage(partialMsg, toConversation: conversationID)
+                } catch {
+                    print("[ChatVM] Failed to persist partial message on stop: \(error)")
+                }
+            }
+        }
+
+        isStreaming = false
+        isReasoningActive = false
+        activeReasoningText = ""
+        activeContentText = ""
+        liveToolOutput = ""
+        isProcessing = false
+
+        updateContextUsage()
+    }
+
+    /// 实际执行发送消息的内部方法。
+    /// - Parameters:
+    ///   - text: 已清理的用户输入文本。
+    ///   - generation: 本次请求的代际令牌，用于回调过期检测。
+    private func performSendMessage(text: String, generation: UUID) async {
         isProcessing = true
         error = nil
 
         // Add user message
         let userMsg = Message(role: .user, content: text)
         messages.append(userMsg)
-        try? await store.addMessage(userMsg, toConversation: conversationID)
+        do {
+            try await store.addMessage(userMsg, toConversation: conversationID)
+        } catch {
+            print("[ChatVM] Failed to persist user message: \(error)")
+        }
 
         // Add loading indicator
         let loadingMsg = Message(id: UUID(), role: .assistant, content: "", isLoading: true)
@@ -183,31 +251,43 @@ final class ChatViewModel {
 
             useCase.onToolCallNeedsConfirmation = { [weak self] toolCall in
                 guard let self else { return .denied }
-                return await self.requestConfirmation(for: toolCall)
+                return await self.guardedRequestConfirmation(for: toolCall, generation: generation)
             }
 
             useCase.onReasoningUpdate = { [weak self] chunk in
-                guard let self else { return }
+                guard let self, self.generationID == generation else { return }
                 self.activeReasoningText += chunk
                 self.isReasoningActive = true
             }
 
             useCase.onContentUpdate = { [weak self] chunk in
-                guard let self else { return }
+                guard let self, self.generationID == generation else { return }
                 self.activeContentText += chunk
                 self.isReasoningActive = false
             }
 
             useCase.onToolOutputUpdate = { [weak self] output in
-                guard let self else { return }
+                guard let self, self.generationID == generation else { return }
                 self.liveToolOutput = output
             }
 
+            // 捕获 store/conversationID 用于即时持久化，不依赖 self 存活
+            let capturedStore = store
+            let capturedConvID = conversationID
+
             useCase.onIntermediateMessage = { [weak self] message in
-                guard let self else { return }
+                guard let self, self.generationID == generation else { return }
                 // Remove loading indicator and add the real message
                 self.messages.removeAll { $0.isLoading }
                 self.messages.append(message)
+                // 即时持久化中间消息，取消时不会丢失已完成的工具调用结果
+                Task {
+                    do {
+                        try await capturedStore.addMessage(message, toConversation: capturedConvID)
+                    } catch {
+                        print("[ChatVM] Failed to persist intermediate message \(message.id): \(error)")
+                    }
+                }
                 // Reset streaming state for next round — each round gets its own thinking bubble
                 self.activeContentText = ""
                 self.activeReasoningText = ""
@@ -229,21 +309,34 @@ final class ChatViewModel {
                 serverContext: serverContext
             )
 
+            // 代际检查：若已被 stopGeneration() 失效则不再修改状态
+            guard generationID == generation else { return }
+
             // Remove loading indicator
             messages.removeAll { $0.isLoading }
 
-            // Persist new messages
+            // 补齐 UI 数组（onIntermediateMessage 可能已添加部分，此处去重）
+            // 持久化由 addMessage 幂等保护，已落库的消息不会重复写入
             for msg in resultMessages {
                 if !messages.contains(where: { $0.id == msg.id }) {
                     messages.append(msg)
                 }
-                try? await store.addMessage(msg, toConversation: conversationID)
+                do {
+                    try await store.addMessage(msg, toConversation: conversationID)
+                } catch {
+                    print("[ChatVM] Failed to persist message \(msg.id): \(error)")
+                }
             }
 
             // 首次 AI 回复后自动生成会话标题
             await generateConversationTitle()
 
+        } catch is CancellationError {
+            // 用户主动中断，stopGeneration() 已处理 UI 清理
+            print("[ChatVM] Generation cancelled by user")
+            return
         } catch {
+            guard generationID == generation else { return }
             print("[ChatVM] Error: \(error)")
             messages.removeAll { $0.isLoading }
             let errorMsg = Message(role: .system, content: String(localized: "Error: \(error.localizedDescription)"))
@@ -251,12 +344,14 @@ final class ChatViewModel {
             self.error = error.localizedDescription
         }
 
+        guard generationID == generation else { return }
         isStreaming = false
         isReasoningActive = false
         activeReasoningText = ""
         activeContentText = ""
         liveToolOutput = ""
         isProcessing = false
+        currentTask = nil
         updateContextUsage()
     }
 
@@ -287,6 +382,7 @@ final class ChatViewModel {
         }
 
         // 异步调用 AI 生成更精准的标题（失败不影响已有 fallback）
+        // 标题是会话级属性，不受 generationID 约束；titleGenerated 已防重入。
         Task { [weak self, aiService, store, conversationID, messages] in
             do {
                 let aiTitle = try await aiService.generateTitle(for: messages)
@@ -301,6 +397,12 @@ final class ChatViewModel {
                 print("[ChatVM] AI title generation failed, keeping fallback: \(error)")
             }
         }
+    }
+
+    /// 带代际检查的审批入口，供 `@Sendable` 闭包安全调用。
+    private func guardedRequestConfirmation(for toolCall: ToolCall, generation: UUID) async -> ExecuteNaturalLanguageCommandUseCase.CommandApproval {
+        guard generationID == generation else { return .denied }
+        return await requestConfirmation(for: toolCall)
     }
 
     /// 发起工具调用审批，并通过 continuation 挂起等待用户操作。

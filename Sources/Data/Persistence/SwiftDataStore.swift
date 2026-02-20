@@ -117,6 +117,12 @@ actor SwiftDataStore {
     /// - Note: 若会话不存在则静默返回。
     /// - Side Effects: 会写入新消息并更新 `conversation.updatedAt`。
     func addMessage(_ message: Message, toConversation conversationID: UUID) throws {
+        // 幂等保护：若同 ID 消息已存在则跳过，避免 @Attribute(.unique) 引发的隐式 upsert
+        let msgID = message.id
+        let msgPredicate = #Predicate<MessageModel> { $0.id == msgID }
+        let msgDescriptor = FetchDescriptor(predicate: msgPredicate)
+        guard try modelContext.fetch(msgDescriptor).isEmpty else { return }
+
         let predicate = #Predicate<ConversationModel> { $0.id == conversationID }
         let descriptor = FetchDescriptor(predicate: predicate)
         if let conversation = try modelContext.fetch(descriptor).first {

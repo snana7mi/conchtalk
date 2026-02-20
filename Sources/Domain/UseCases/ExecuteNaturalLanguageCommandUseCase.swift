@@ -67,6 +67,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
         let maxIterations = 50
         var iteration = 0
         while iteration < maxIterations {
+            try Task.checkCancellation()
             iteration += 1
 
             switch response {
@@ -264,6 +265,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
     /// - Throws: 工具执行失败或超时时抛出。
     /// - Side Effects: 通过 `onToolOutputUpdate` 实时推送执行输出。
     private func executeTool(_ tool: ToolProtocol, arguments: [String: Any]) async throws -> ToolExecutionResult {
+        try Task.checkCancellation()
         if tool.supportsStreaming,
            let stream = try await tool.executeStreaming(arguments: arguments, sshClient: sshClient) {
             return try await consumeStreamingWithTimeout(stream)
@@ -331,6 +333,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
         history: [Message],
         serverContext: String
     ) async throws -> AIResponse {
+        try Task.checkCancellation()
         if !pendingToolCalls.isEmpty {
             return .toolCall(pendingToolCalls.removeFirst(), reasoning: nil)
         }
@@ -342,6 +345,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
     }
 
     private func sendWithStreaming(_ streamFactory: @escaping @Sendable () -> AsyncStream<StreamingDelta>) async throws -> AIResponse {
+        try Task.checkCancellation()
         let stream = streamFactory()
 
         var accumulatedReasoning = ""
@@ -349,6 +353,7 @@ final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendable {
         var resultToolCalls: [ToolCall] = []
 
         for await delta in stream {
+            try Task.checkCancellation()
             switch delta {
             case .reasoning(let chunk):
                 accumulatedReasoning += chunk

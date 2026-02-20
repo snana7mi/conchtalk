@@ -185,7 +185,7 @@ actor NIOSSHClient: SSHClientProtocol {
     /// - Note: 如果未连接会通过流抛出 `SSHError.notConnected`。
     nonisolated func executeStreaming(command: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 guard await self._isConnected, let client = await self.client else {
                     continuation.finish(throwing: SSHError.notConnected)
                     return
@@ -194,6 +194,7 @@ actor NIOSSHClient: SSHClientProtocol {
                 do {
                     let stream = try await client.executeCommandStream(command)
                     for try await chunk in stream {
+                        try Task.checkCancellation()
                         let buffer: ByteBuffer
                         switch chunk {
                         case .stdout(let buf):
@@ -210,6 +211,7 @@ actor NIOSSHClient: SSHClientProtocol {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

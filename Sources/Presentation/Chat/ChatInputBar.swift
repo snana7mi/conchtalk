@@ -8,6 +8,7 @@ struct ChatInputBar: View {
     let isConnected: Bool
     var contextUsagePercent: Double = 0
     let onSend: () -> Void
+    var onStop: (() -> Void)?
 
     @FocusState private var isFocused: Bool
 
@@ -45,22 +46,28 @@ struct ChatInputBar: View {
                         }
                     }
 
-                Button(action: onSend) {
-                    Group {
-                        if isProcessing {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .fontWeight(.semibold)
-                        }
+                if isProcessing {
+                    Button {
+                        onStop?()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 14))
+                            .frame(width: 32, height: 32)
+                            .background(Color.red)
+                            .clipShape(Circle())
+                            .foregroundStyle(.white)
                     }
-                    .frame(width: 32, height: 32)
-                    .background(canSend ? Theme.userBubbleColor : Color.secondary.opacity(0.3))
-                    .clipShape(Circle())
-                    .foregroundStyle(.white)
+                } else {
+                    Button(action: onSend) {
+                        Image(systemName: "arrow.up")
+                            .fontWeight(.semibold)
+                            .frame(width: 32, height: 32)
+                            .background(canSend ? Theme.userBubbleColor : Color.secondary.opacity(0.3))
+                            .clipShape(Circle())
+                            .foregroundStyle(.white)
+                    }
+                    .disabled(!canSend)
                 }
-                .disabled(!canSend)
             }
         }
         .padding(.horizontal, Theme.screenPadding)

@@ -100,7 +100,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
     /// - Side Effects: 可能更新内部 `cachedSummary`。
     func sendMessageStreaming(_ message: String, conversationHistory: [Message], serverContext: String) -> AsyncStream<StreamingDelta> {
         AsyncStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
                     messages.append(["role": "user", "content": message])
@@ -129,12 +129,13 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                     continuation.finish()
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
     func sendToolResultStreaming(_ result: String, forToolCall toolCall: ToolCall, conversationHistory: [Message], serverContext: String) -> AsyncStream<StreamingDelta> {
         AsyncStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     var messages = buildOpenAIMessages(from: conversationHistory, serverContext: serverContext)
                     messages = try await compressIfNeeded(messages)
@@ -161,6 +162,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
                     continuation.finish()
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
@@ -376,6 +378,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
 
         do {
             for try await line in bytes.lines {
+                try Task.checkCancellation()
                 guard line.hasPrefix("data: ") else { continue }
                 let payload = String(line.dropFirst(6))
                 if payload == "[DONE]" { break }
@@ -465,7 +468,7 @@ final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
             } catch let error as URLError where error.code == .networkConnectionLost && attempt < maxRetries {
                 lastError = error
                 print("[AIProxy] Connection lost (-1005), retrying stream... (attempt \(attempt + 1))")
-                try? await Task.sleep(for: .milliseconds(500))
+                try await Task.sleep(for: .milliseconds(500)) // throws on cancellation
             }
         }
         throw lastError!

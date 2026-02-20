@@ -104,9 +104,8 @@ struct ChatView: View {
                 isProcessing: viewModel.isProcessing,
                 isConnected: viewModel.isConnected,
                 contextUsagePercent: viewModel.contextUsagePercent,
-                onSend: {
-                    Task { await viewModel.sendMessage() }
-                }
+                onSend: { viewModel.sendMessage() },
+                onStop: { viewModel.stopGeneration() }
             )
         }
         .navigationTitle(viewModel.serverDisplayName)
