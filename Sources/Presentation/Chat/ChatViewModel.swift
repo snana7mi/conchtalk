@@ -23,6 +23,8 @@ final class ChatViewModel {
     /// 工具执行过程中的实时输出文本，供 UI 在加载气泡中展示命令执行进度。
     /// - Note: 当前为缓冲模式（工具执行完成后一次性推送）；未来接入流式执行后将逐块更新。
     var liveToolOutput: String = ""
+    /// 当前会话标题，用于导航栏显示。
+    var conversationTitle: String = ""
 
     private var server: Server
     private var conversationID: UUID
@@ -56,7 +58,10 @@ final class ChatViewModel {
     }
 
     var serverDisplayName: String {
-        "\(server.username)@\(server.host)"
+        if conversationTitle.isEmpty {
+            return server.name
+        }
+        return "\(server.name) - \(conversationTitle)"
     }
 
     /// 基于当前消息历史估算上下文窗口占用比例。
@@ -80,6 +85,7 @@ final class ChatViewModel {
                 // 已有非默认标题的会话无需再次生成标题。
                 if existing.title != "New Conversation" {
                     titleGenerated = true
+                    conversationTitle = existing.title
                 }
                 updateContextUsage()
             } else {
@@ -274,13 +280,14 @@ final class ChatViewModel {
         do {
             try await store.updateConversationTitle(conversationID, title: fallbackTitle)
             titleGenerated = true
+            conversationTitle = fallbackTitle
         } catch {
             print("[ChatVM] Failed to persist fallback title, will retry next message: \(error)")
             return
         }
 
         // 异步调用 AI 生成更精准的标题（失败不影响已有 fallback）
-        Task.detached { [aiService, store, conversationID, messages] in
+        Task { [weak self, aiService, store, conversationID, messages] in
             do {
                 let aiTitle = try await aiService.generateTitle(for: messages)
                 guard !aiTitle.isEmpty else { return }
@@ -288,6 +295,7 @@ final class ChatViewModel {
                     ? String(aiTitle.prefix(30)) + "..."
                     : aiTitle
                 try await store.updateConversationTitle(conversationID, title: finalTitle)
+                self?.conversationTitle = finalTitle
                 print("[ChatVM] AI generated title: \(finalTitle)")
             } catch {
                 print("[ChatVM] AI title generation failed, keeping fallback: \(error)")
