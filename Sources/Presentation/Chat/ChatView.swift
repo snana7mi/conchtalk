@@ -14,6 +14,9 @@ struct ChatView: View {
     /// 健康检查任务是否处于活跃状态。
     @State private var healthCheckActive = false
 
+    /// 流式滚动防抖任务。
+    @State private var scrollDebounceTask: Task<Void, Never>?
+
     var body: some View {
         VStack(spacing: 0) {
             // 连接状态横幅
@@ -34,6 +37,7 @@ struct ChatView: View {
                                     )
                                     Spacer(minLength: 60)
                                 }
+                                .id("thinking-\(message.id)")
                             }
 
                             // Show live streaming thinking bubble before the loading indicator
@@ -68,9 +72,9 @@ struct ChatView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 #if os(iOS)
-                .onTapGesture {
+                .simultaneousGesture(TapGesture().onEnded {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
+                })
                 #endif
                 .onChange(of: viewModel.messages.count) {
                     if let lastMessage = viewModel.messages.last {
@@ -80,19 +84,13 @@ struct ChatView: View {
                     }
                 }
                 .onChange(of: viewModel.activeReasoningText) {
-                    if let lastMessage = viewModel.messages.last {
-                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                    }
+                    scheduleScrollToBottom(proxy: proxy)
                 }
                 .onChange(of: viewModel.activeContentText) {
-                    if let lastMessage = viewModel.messages.last {
-                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                    }
+                    scheduleScrollToBottom(proxy: proxy)
                 }
                 .onChange(of: viewModel.liveToolOutput) {
-                    if let lastMessage = viewModel.messages.last {
-                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                    }
+                    scheduleScrollToBottom(proxy: proxy)
                 }
             }
 
@@ -150,6 +148,20 @@ struct ChatView: View {
         .task(id: healthCheckActive) {
             guard healthCheckActive else { return }
             await runHealthCheck()
+        }
+    }
+
+    // MARK: - 流式滚动防抖
+
+    /// 防抖调度滚动到底部，最多每 50ms 执行一次。
+    private func scheduleScrollToBottom(proxy: ScrollViewProxy) {
+        scrollDebounceTask?.cancel()
+        scrollDebounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            if let lastMessage = viewModel.messages.last {
+                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+            }
         }
     }
 

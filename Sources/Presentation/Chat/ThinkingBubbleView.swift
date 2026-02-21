@@ -11,26 +11,33 @@ struct ThinkingBubbleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Header
-            HStack(spacing: 8) {
-                Image(systemName: "brain")
-                    .foregroundStyle(.purple)
-                    .font(.caption)
-
-                Text("Thinking")
-                    .font(.callout)
-                    .foregroundStyle(.primary)
-
-                if isLiveStreaming {
-                    PulsingDot()
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "brain")
+                        .foregroundStyle(.purple)
+                        .font(.caption)
 
-                Spacer()
+                    Text("Thinking")
+                        .font(.callout)
+                        .foregroundStyle(.primary)
 
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    if isLiveStreaming {
+                        PulsingDot()
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
             }
+            .buttonStyle(.plain)
 
             if isExpanded {
                 Text(reasoningContent)
@@ -42,12 +49,6 @@ struct ThinkingBubbleView: View {
         .padding(Theme.bubblePadding)
         .background(Theme.reasoningBubbleColor)
         .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleCornerRadius))
-        .contentShape(RoundedRectangle(cornerRadius: Theme.bubbleCornerRadius))
-        .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.toggle()
-            }
-        }
         .onChange(of: isLiveStreaming) { oldValue, newValue in
             if !oldValue && newValue {
                 // Started streaming -> expand
@@ -67,15 +68,6 @@ struct ThinkingBubbleView: View {
         .onAppear {
             if isLiveStreaming {
                 isExpanded = true
-            } else if !reasoningContent.isEmpty {
-                // Persisted thinking: start expanded, then auto-collapse
-                isExpanded = true
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(800))
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isExpanded = false
-                    }
-                }
             }
         }
     }
