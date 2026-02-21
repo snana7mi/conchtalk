@@ -115,7 +115,8 @@ final class ChatViewModel {
             try await sshManager.connect(to: server, password: password, keychainService: keychainService)
             isConnected = true
 
-            let connectMsg = Message(role: .system, content: String(localized: "SSH connection established"))
+            let timestamp = Date.now.formatted(date: .abbreviated, time: .standard)
+            let connectMsg = Message(role: .system, content: String(localized: "SSH connection established") + " (\(timestamp))")
             messages.append(connectMsg)
             try await store.addMessage(connectMsg, toConversation: conversationID)
         } catch {
