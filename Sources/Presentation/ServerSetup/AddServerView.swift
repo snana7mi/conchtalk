@@ -27,10 +27,10 @@ struct AddServerView: View {
         case password
         case privateKey
 
-        var displayName: LocalizedStringResource {
+        var displayName: String {
             switch self {
-            case .password: "Password"
-            case .privateKey: "SSH Key"
+            case .password: String(localized: "Password")
+            case .privateKey: String(localized: "SSH Key")
             }
         }
     }
@@ -94,7 +94,7 @@ struct AddServerView: View {
                 Section("Authentication") {
                     Picker("Method", selection: $authType) {
                         ForEach(AuthType.allCases, id: \.self) { type in
-                            Text(type.displayName).tag(type)
+                            Text(verbatim: type.displayName).tag(type)
                         }
                     }
                     .pickerStyle(.segmented)
