@@ -156,7 +156,7 @@ extension KnownHostsStore {
 /// TOFUHostKeyValidator：
 /// 实现 `NIOSSHClientServerAuthenticationDelegate`，在 EventLoop promise 回调中
 /// 桥接 actor 调用完成 TOFU 校验。
-private final class TOFUHostKeyValidator: @preconcurrency NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
+private final class TOFUHostKeyValidator: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
     private let store: KnownHostsStore
     private let host: String
     private let port: Int
