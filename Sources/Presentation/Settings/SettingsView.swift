@@ -68,11 +68,6 @@ struct SettingsView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        #if os(iOS)
-        .onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        }
-        #endif
         .navigationTitle("Settings")
         .alert("Settings Saved", isPresented: $showSaved) {
             Button("OK") {}
