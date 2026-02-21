@@ -94,7 +94,7 @@ struct AddServerView: View {
                 Section("Authentication") {
                     Picker("Method", selection: $authType) {
                         ForEach(AuthType.allCases, id: \.self) { type in
-                            Text(String(localized: type.displayName)).tag(type)
+                            Text(type.displayName).tag(type)
                         }
                     }
                     .pickerStyle(.segmented)
