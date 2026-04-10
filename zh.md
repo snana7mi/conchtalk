@@ -173,6 +173,10 @@ ConchTalk 当前声明的直接 Swift Package 依赖如下：
   
 详见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
 
+## 鸣谢
+
+特别感谢 [LINUX.DO](https://linux.do) 提供推广平台。
+
 ## 项目许可证
 
 本项目使用 **Apache License 2.0** 开源。详见 [LICENSE](./LICENSE)。

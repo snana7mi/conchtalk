@@ -179,6 +179,10 @@ See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for attribution details.
 
 ConchTalk is currently structured as an actively evolving app codebase. Interfaces, protocols, and supported remote-agent workflows may continue to change.
 
+## Acknowledgements
+
+Special thanks to [LINUX.DO](https://linux.do) for providing a promotion platform.
+
 ## License
 
 This project is licensed under the **Apache License 2.0**. See [LICENSE](./LICENSE) for details.
