@@ -1,0 +1,69 @@
+/// 文件说明：Message，定义聊天消息的领域实体模型。
+import Foundation
+
+/// Message：
+/// 表示会话中的单条消息，覆盖用户输入、助手回复、工具执行结果与系统提示。
+nonisolated struct Message: Identifiable, Sendable {
+    let id: UUID
+    var role: MessageRole
+    var content: String
+    var timestamp: Date
+    var toolCall: ToolCall?     // Non-nil for tool-call messages
+    var toolOutput: String?     // Raw output from tool execution
+    var reasoningContent: String? // AI reasoning/thinking chain (e.g. DeepSeek R1)
+    var systemMessageType: SystemMessageType? // 系统消息语义类型（仅 .system 角色使用）
+    var isLoading: Bool
+    /// 消息产生时的来源（nil 表示旧消息，等同 .normal）。
+    var source: MessageSource? = nil
+
+    /// MessageRole：定义消息在会话中的角色语义。
+    enum MessageRole: String, Codable, Sendable {
+        case user
+        case assistant
+        case command       // Kept as "command" for backward compat with persisted roleRaw
+        case system
+    }
+
+    /// SystemMessageType：区分系统消息的语义类型，用于视觉区分和图标选择。
+    enum SystemMessageType: String, Codable, Sendable {
+        case connected
+        case disconnected
+        case connectionLost
+        case reconnected
+        case connectionFailed
+        case error
+        case info
+        case commandDenied
+        case skillLoaded
+        /// AI 专用上下文标记，发送给 AI 但不在聊天界面显示。
+        case aiContext
+        /// 上下文断点标记，用于分割上下文窗口。
+        case contextBreak
+        /// Relay 连接状态消息（如 connected / disconnected），不在聊天界面显示。
+        case relayStatus
+    }
+
+    /// 初始化消息实体。
+    /// - Parameters:
+    ///   - id: 消息标识。
+    ///   - role: 消息角色。
+    ///   - content: 消息正文。
+    ///   - timestamp: 消息时间戳。
+    ///   - toolCall: 关联的工具调用信息（仅 command 消息使用）。
+    ///   - toolOutput: 工具输出文本（仅 command 消息使用）。
+    ///   - reasoningContent: 模型推理链内容（可选）。
+    ///   - isLoading: 是否为占位加载消息。
+    ///   - source: 消息来源（nil 表示旧消息，等同 .normal）。
+    init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date(), toolCall: ToolCall? = nil, toolOutput: String? = nil, reasoningContent: String? = nil, systemMessageType: SystemMessageType? = nil, isLoading: Bool = false, source: MessageSource? = nil) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.timestamp = timestamp
+        self.toolCall = toolCall
+        self.toolOutput = toolOutput
+        self.reasoningContent = reasoningContent
+        self.systemMessageType = systemMessageType
+        self.isLoading = isLoading
+        self.source = source
+    }
+}

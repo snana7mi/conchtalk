@@ -1,0 +1,49 @@
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+
+# Swift Package Manager
+.build/
+Packages/
+*.resolved
+
+# Go
+conchtalk-server/server
+conchtalk-server/conchtalk-server
+
+# Environment
+.env
+.env.local
+Secrets.local.xcconfig
+package-lock.json
+package.json
+
+# Integration test config (contains credentials)
+integration_test_config.json
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/
+.serena/
+.superpowers/
+
+
+.gemini/
+# Docs (plans, specs, mockups — local only)
+docs/
+.worktrees/
+node_modules/
+CLAUDE.md
+.agents/plugins/marketplace.json
+plugins/superpowers/.codex-plugin/plugin.json

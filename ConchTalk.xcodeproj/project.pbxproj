@@ -1,0 +1,785 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		24370E842F43044700E6DB92 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 240D8B962F42F3C900FBFD13 /* Citadel */; };
+		24B1C0032F630000000ACP01 /* ACPModel in Frameworks */ = {isa = PBXBuildFile; productRef = 24B1C0042F630000000ACP02 /* ACPModel */; };
+		24D38EDE2F7E3FB300C97364 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 24D38EDD2F7E3FB300C97364 /* RevenueCat */; };
+		24FE2D0F2F7A50640001CA77 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24FE2CF02F7A4F8C0001CA77 /* WidgetKit.framework */; };
+		24FE2D102F7A50640001CA77 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24FE2CF22F7A4F8C0001CA77 /* SwiftUI.framework */; };
+		24FE2D212F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BB00000200000000000000B2 /* Skills in Resources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000B1 /* Skills */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		24FE2D1F2F7A50640001CA77 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 240D8B7D2F42F3C800FBFD13 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 24FE2D0D2F7A50640001CA77;
+			remoteInfo = ConchTalkLiveActivityExtension;
+		};
+		AA000001000000000000AA01 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 240D8B7D2F42F3C800FBFD13 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 240D8B842F42F3C800FBFD13;
+			remoteInfo = ConchTalk;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		24FE2D052F7A4F8C0001CA77 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				24FE2D212F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		240D8B852F42F3C800FBFD13 /* ConchTalk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ConchTalk.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		243718FB2F4ED8F400E6DB92 /* ConchTalk.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ConchTalk.entitlements; sourceTree = "<group>"; };
+		24FE2CF02F7A4F8C0001CA77 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		24FE2CF22F7A4F8C0001CA77 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ConchTalkLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA000002000000000000AA02 /* ConchTalkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ConchTalkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB00000100000000000000B1 /* Skills */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Skills; sourceTree = "<group>"; };
+		CC00000100000000000000C1 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		24FE2D222F7A50640001CA77 /* Exceptions for "ConchTalkLiveActivity" folder in "ConchTalkLiveActivityExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 24FE2D0D2F7A50640001CA77 /* ConchTalkLiveActivityExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		240D8B872F42F3C800FBFD13 /* Sources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		24FE2D112F7A50640001CA77 /* ConchTalkLiveActivity */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				24FE2D222F7A50640001CA77 /* Exceptions for "ConchTalkLiveActivity" folder in "ConchTalkLiveActivityExtension" target */,
+			);
+			path = ConchTalkLiveActivity;
+			sourceTree = "<group>";
+		};
+		AA000003000000000000AA03 /* ConchTalkTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ConchTalkTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		240D8B822F42F3C800FBFD13 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				24370E842F43044700E6DB92 /* Citadel in Frameworks */,
+				24B1C0032F630000000ACP01 /* ACPModel in Frameworks */,
+				24D38EDE2F7E3FB300C97364 /* RevenueCat in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		24FE2D0B2F7A50640001CA77 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				24FE2D102F7A50640001CA77 /* SwiftUI.framework in Frameworks */,
+				24FE2D0F2F7A50640001CA77 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA000004000000000000AA04 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		240D8B7C2F42F3C800FBFD13 = {
+			isa = PBXGroup;
+			children = (
+				243718FB2F4ED8F400E6DB92 /* ConchTalk.entitlements */,
+				240D8B872F42F3C800FBFD13 /* Sources */,
+				BB00000100000000000000B1 /* Skills */,
+				AA000003000000000000AA03 /* ConchTalkTests */,
+				24FE2D112F7A50640001CA77 /* ConchTalkLiveActivity */,
+				24FE2CEF2F7A4F8C0001CA77 /* Frameworks */,
+				240D8B862F42F3C800FBFD13 /* Products */,
+				24D3AFBF2F7E563A00C97364 /* Recovered References */,
+			);
+			sourceTree = "<group>";
+		};
+		240D8B862F42F3C800FBFD13 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				240D8B852F42F3C800FBFD13 /* ConchTalk.app */,
+				AA000002000000000000AA02 /* ConchTalkTests.xctest */,
+				24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		24D3AFBF2F7E563A00C97364 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				CC00000100000000000000C1 /* Secrets.xcconfig */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
+		24FE2CEF2F7A4F8C0001CA77 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				24FE2CF02F7A4F8C0001CA77 /* WidgetKit.framework */,
+				24FE2CF22F7A4F8C0001CA77 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		240D8B842F42F3C800FBFD13 /* ConchTalk */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 240D8B922F42F3C900FBFD13 /* Build configuration list for PBXNativeTarget "ConchTalk" */;
+			buildPhases = (
+				240D8B812F42F3C800FBFD13 /* Sources */,
+				240D8B822F42F3C800FBFD13 /* Frameworks */,
+				240D8B832F42F3C800FBFD13 /* Resources */,
+				24FE2D052F7A4F8C0001CA77 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				24FE2D202F7A50640001CA77 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				240D8B872F42F3C800FBFD13 /* Sources */,
+			);
+			name = ConchTalk;
+			packageProductDependencies = (
+				240D8B962F42F3C900FBFD13 /* Citadel */,
+				24B1C0042F630000000ACP02 /* ACPModel */,
+				24D38EDD2F7E3FB300C97364 /* RevenueCat */,
+			);
+			productName = ConchTalk;
+			productReference = 240D8B852F42F3C800FBFD13 /* ConchTalk.app */;
+			productType = "com.apple.product-type.application";
+		};
+		24FE2D0D2F7A50640001CA77 /* ConchTalkLiveActivityExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 24FE2D232F7A50640001CA77 /* Build configuration list for PBXNativeTarget "ConchTalkLiveActivityExtension" */;
+			buildPhases = (
+				24FE2D0A2F7A50640001CA77 /* Sources */,
+				24FE2D0B2F7A50640001CA77 /* Frameworks */,
+				24FE2D0C2F7A50640001CA77 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				24FE2D112F7A50640001CA77 /* ConchTalkLiveActivity */,
+			);
+			name = ConchTalkLiveActivityExtension;
+			packageProductDependencies = (
+			);
+			productName = ConchTalkLiveActivityExtension;
+			productReference = 24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		AA000005000000000000AA05 /* ConchTalkTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA000010000000000000AA10 /* Build configuration list for PBXNativeTarget "ConchTalkTests" */;
+			buildPhases = (
+				AA000006000000000000AA06 /* Sources */,
+				AA000004000000000000AA04 /* Frameworks */,
+				AA000007000000000000AA07 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA000008000000000000AA08 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA000003000000000000AA03 /* ConchTalkTests */,
+			);
+			name = ConchTalkTests;
+			productName = ConchTalkTests;
+			productReference = AA000002000000000000AA02 /* ConchTalkTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		240D8B7D2F42F3C800FBFD13 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					240D8B842F42F3C800FBFD13 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					24FE2D0D2F7A50640001CA77 = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					AA000005000000000000AA05 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 240D8B842F42F3C800FBFD13;
+					};
+				};
+			};
+			buildConfigurationList = 240D8B802F42F3C800FBFD13 /* Build configuration list for PBXProject "ConchTalk" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"zh-Hans",
+				ja,
+			);
+			mainGroup = 240D8B7C2F42F3C800FBFD13;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				240D8B952F42F3C900FBFD13 /* XCRemoteSwiftPackageReference "citadel" */,
+				24B1C0052F630000000ACP03 /* XCRemoteSwiftPackageReference "swift-acp" */,
+				24D38EDC2F7E3FB300C97364 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 240D8B862F42F3C800FBFD13 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				240D8B842F42F3C800FBFD13 /* ConchTalk */,
+				AA000005000000000000AA05 /* ConchTalkTests */,
+				24FE2D0D2F7A50640001CA77 /* ConchTalkLiveActivityExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		240D8B832F42F3C800FBFD13 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB00000200000000000000B2 /* Skills in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		24FE2D0C2F7A50640001CA77 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA000007000000000000AA07 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		240D8B812F42F3C800FBFD13 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		24FE2D0A2F7A50640001CA77 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA000006000000000000AA06 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		24FE2D202F7A50640001CA77 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 24FE2D0D2F7A50640001CA77 /* ConchTalkLiveActivityExtension */;
+			targetProxy = 24FE2D1F2F7A50640001CA77 /* PBXContainerItemProxy */;
+		};
+		AA000008000000000000AA08 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 240D8B842F42F3C800FBFD13 /* ConchTalk */;
+			targetProxy = AA000001000000000000AA01 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		240D8B902F42F3C900FBFD13 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		240D8B912F42F3C900FBFD13 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		240D8B932F42F3C900FBFD13 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = CC00000100000000000000C1 /* Secrets.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = ConchTalk.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSContactsUsageDescription = "ConchTalk uses your contacts to load your iCloud profile photo as default avatar.";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
+		240D8B942F42F3C900FBFD13 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = CC00000100000000000000C1 /* Secrets.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = ConchTalk.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSContactsUsageDescription = "ConchTalk uses your contacts to load your iCloud profile photo as default avatar.";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
+		24FE2D242F7A50640001CA77 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ConchTalkLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ConchTalkLiveActivity;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk.ConchTalkLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		24FE2D252F7A50640001CA77 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ConchTalkLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ConchTalkLiveActivity;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk.ConchTalkLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		AA000011000000000000AA11 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalkTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ConchTalk.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ConchTalk";
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
+		AA000012000000000000AA12 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = Z9VKH39WMD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalkTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ConchTalk.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ConchTalk";
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		240D8B802F42F3C800FBFD13 /* Build configuration list for PBXProject "ConchTalk" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				240D8B902F42F3C900FBFD13 /* Debug */,
+				240D8B912F42F3C900FBFD13 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		240D8B922F42F3C900FBFD13 /* Build configuration list for PBXNativeTarget "ConchTalk" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				240D8B932F42F3C900FBFD13 /* Debug */,
+				240D8B942F42F3C900FBFD13 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		24FE2D232F7A50640001CA77 /* Build configuration list for PBXNativeTarget "ConchTalkLiveActivityExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				24FE2D242F7A50640001CA77 /* Debug */,
+				24FE2D252F7A50640001CA77 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA000010000000000000AA10 /* Build configuration list for PBXNativeTarget "ConchTalkTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA000011000000000000AA11 /* Debug */,
+				AA000012000000000000AA12 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		240D8B952F42F3C900FBFD13 /* XCRemoteSwiftPackageReference "citadel" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/orlandos-nl/citadel.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.12.0;
+			};
+		};
+		24B1C0052F630000000ACP03 /* XCRemoteSwiftPackageReference "swift-acp" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/wiedymi/swift-acp.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		24D38EDC2F7E3FB300C97364 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.67.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		240D8B962F42F3C900FBFD13 /* Citadel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 240D8B952F42F3C900FBFD13 /* XCRemoteSwiftPackageReference "citadel" */;
+			productName = Citadel;
+		};
+		24B1C0042F630000000ACP02 /* ACPModel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 24B1C0052F630000000ACP03 /* XCRemoteSwiftPackageReference "swift-acp" */;
+			productName = ACPModel;
+		};
+		24D38EDD2F7E3FB300C97364 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 24D38EDC2F7E3FB300C97364 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 240D8B7D2F42F3C800FBFD13 /* Project object */;
+}
