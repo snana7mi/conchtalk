@@ -17,8 +17,8 @@ struct RelayStatusResponse: Sendable {
     let lastSeenIp: String?
 
     var isDaemonOnline: Bool {
-        guard let lastSeen = lastSeenAt else { return false }
-        guard let date = ISO8601DateFormatter().date(from: lastSeen) else { return false }
+        guard let lastSeen = lastSeenAt,
+              let date = try? Date(lastSeen, strategy: .iso8601) else { return false }
         // daemon 每 30 秒 ping，DO 写 D1 有延迟，放宽到 5 分钟
         return Date().timeIntervalSince(date) < 300
     }

@@ -78,22 +78,30 @@ final class ServerListViewModel {
             daemonOnlineServers = []
             return
         }
-        var online: Set<UUID> = []
-        await withTaskGroup(of: (UUID, Bool).self) { group in
+        // 并发拉取原始状态（task group 为非隔离上下文，避免在其中调用 @MainActor 属性）
+        var results: [(UUID, RelayStatusResponse?)] = []
+        await withTaskGroup(of: (UUID, RelayStatusResponse?).self) { group in
             for server in dlcServers {
                 group.addTask {
                     do {
                         let status = try await service.getStatus(serverID: server.id)
-                        print("[DLC] refreshDaemonStatus: server=\(server.id), status=\(status.status), lastSeen=\(status.lastSeenAt ?? "nil"), online=\(status.isDaemonOnline)")
-                        return (server.id, status.isDaemonOnline)
+                        return (server.id, status)
                     } catch {
                         print("[DLC] refreshDaemonStatus: server=\(server.id), error=\(error)")
-                        return (server.id, false)
+                        return (server.id, nil)
                     }
                 }
             }
-            for await (id, isOnline) in group {
-                if isOnline { online.insert(id) }
+            for await result in group {
+                results.append(result)
+            }
+        }
+        // 回到主 actor 上下文后再计算在线状态
+        var online: Set<UUID> = []
+        for (id, status) in results {
+            if let status {
+                print("[DLC] refreshDaemonStatus: server=\(id), status=\(status.status), lastSeen=\(status.lastSeenAt ?? "nil"), online=\(status.isDaemonOnline)")
+                if status.isDaemonOnline { online.insert(id) }
             }
         }
         daemonOnlineServers = online

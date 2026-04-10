@@ -4,8 +4,8 @@ import Foundation
 /// DLCSettings：管理 DLC 代理模式的开关状态。
 /// 前置条件：登录 + paid + 云同步已开启。
 enum DLCSettings {
-    private static let globalKey = "DLCSettings.globalEnabled"
-    private static let overridesKey = "DLCSettings.serverOverrides"
+    nonisolated private static let globalKey = "DLCSettings.globalEnabled"
+    nonisolated private static let overridesKey = "DLCSettings.serverOverrides"
 
     nonisolated(unsafe) static var isGlobalEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: globalKey) }
