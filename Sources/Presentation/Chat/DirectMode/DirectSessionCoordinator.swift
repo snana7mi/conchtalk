@@ -51,6 +51,8 @@ final class DirectSessionCoordinator {
     private var connectTask: Task<Void, Never>?
     private var suppressedDisconnectSessionIDs: Set<ObjectIdentifier> = []
     private var activeAgentInfo: AgentInfo?
+    private var lastSSHClient: SSHClient?
+    private var lastRelayConnection: RelayConnection?
 
     // MARK: - Init
 
@@ -101,6 +103,8 @@ final class DirectSessionCoordinator {
         beginConnecting(to: agent)
         state.cwd = cwd
         state.directModeStartMessageCount = currentMessageCount
+        lastSSHClient = sshClient
+        lastRelayConnection = relayConnection
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -141,47 +145,36 @@ final class DirectSessionCoordinator {
             do {
                 try await session.sendPrompt(trimmed)
                 guard !Task.isCancelled else { return }
-
-                let thinkingText = self.state.accumulatedEvents.compactMap { event -> String? in
-                    if case .thinking(let text) = event { return text }
-                    return nil
-                }.joined()
-
-                let streamedText = self.state.accumulatedEvents.compactMap { event -> String? in
-                    if case .text(let text) = event { return text }
-                    return nil
-                }.joined()
-
-                let responseText: String
-                if !streamedText.isEmpty {
-                    responseText = streamedText
-                } else if self.state.accumulatedEvents.isEmpty {
-                    responseText = "Done"
-                } else {
-                    responseText = ""
-                }
-
-                let assistantMsg = Message(
-                    role: .assistant,
-                    content: responseText,
-                    reasoningContent: thinkingText.isEmpty ? nil : thinkingText,
-                    source: source
+                _ = self.emitAssistantMessageIfNeeded(
+                    source: source,
+                    fallbackContent: "Done",
+                    allowEmptyContent: true
                 )
-                self.eventContinuation.yield(.messageReady(assistantMsg))
-
-                self.state.accumulatedEvents = []
                 self.markExecuting(false)
                 self.directPromptTask = nil
             } catch {
                 guard !Task.isCancelled else { return }
 
+                if error is CancellationError {
+                    self.state.accumulatedEvents = []
+                    self.markExecuting(false)
+                    self.directPromptTask = nil
+                    return
+                }
+
+                if self.emitAssistantMessageIfNeeded(source: source) {
+                    self.markExecuting(false)
+                    self.directPromptTask = nil
+
+                    if case ACPConnectionError.disconnected = error {
+                        await self.disconnect()
+                    }
+                    return
+                }
+
                 self.state.accumulatedEvents = []
                 self.markExecuting(false)
                 self.directPromptTask = nil
-
-                if error is CancellationError {
-                    return
-                }
 
                 let errorMsg = Message(
                     role: .assistant,
@@ -293,7 +286,12 @@ final class DirectSessionCoordinator {
         }
 
         do {
-            _ = try await connectSession(agent: agent, cwd: state.cwd, sshClient: nil)
+            _ = try await connectSession(
+                agent: agent,
+                cwd: state.cwd,
+                sshClient: lastSSHClient,
+                relayConnection: lastRelayConnection
+            )
             return true
         } catch {
             resetToIdle()
@@ -424,6 +422,8 @@ final class DirectSessionCoordinator {
         state.accumulatedEvents = []
         activeAgentInfo = nil
         directSession = nil
+        lastSSHClient = nil
+        lastRelayConnection = nil
         eventContinuation.yield(.lifecycleChanged(.idle))
     }
 
@@ -534,5 +534,46 @@ final class DirectSessionCoordinator {
 
     private func suppressNextDisconnectCallback(for session: any DirectAgentSessionType) {
         suppressedDisconnectSessionIDs.insert(sessionIdentity(session))
+    }
+
+    /// 将当前累计的流式输出整理成 assistant 消息。
+    @discardableResult
+    private func emitAssistantMessageIfNeeded(
+        source: MessageSource,
+        fallbackContent: String? = nil,
+        allowEmptyContent: Bool = false
+    ) -> Bool {
+        let thinkingText = state.accumulatedEvents.compactMap { event -> String? in
+            if case .thinking(let text) = event { return text }
+            return nil
+        }.joined()
+
+        let streamedText = state.accumulatedEvents.compactMap { event -> String? in
+            if case .text(let text) = event { return text }
+            return nil
+        }.joined()
+
+        let content: String
+        if !streamedText.isEmpty {
+            content = streamedText
+        } else if let fallbackContent {
+            content = fallbackContent
+        } else {
+            content = ""
+        }
+
+        guard allowEmptyContent || !content.isEmpty || !thinkingText.isEmpty else {
+            return false
+        }
+
+        let assistantMsg = Message(
+            role: .assistant,
+            content: content,
+            reasoningContent: thinkingText.isEmpty ? nil : thinkingText,
+            source: source
+        )
+        eventContinuation.yield(.messageReady(assistantMsg))
+        state.accumulatedEvents = []
+        return true
     }
 }

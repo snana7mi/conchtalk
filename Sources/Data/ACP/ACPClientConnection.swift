@@ -358,14 +358,20 @@ actor ACPClientConnection {
         let paramsValue = try encodeToAnyCodable(params)
         let message = ACPMessage.request(JSONRPCRequest(id: id, method: method, params: paramsValue))
 
-        try await transport.send(message)
-
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AnyCodable?, Error>) in
             self.pendingRequests[key] = continuation
 
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(self?.requestTimeoutSeconds ?? 120))
                 await self?.timeoutRequest(key: key)
+            }
+
+            Task { [weak self] in
+                do {
+                    try await self?.transport.send(message)
+                } catch {
+                    await self?.failPendingRequest(key: key, error: error)
+                }
             }
         }
     }
@@ -374,6 +380,13 @@ actor ACPClientConnection {
     private func timeoutRequest(key: String) {
         if let cont = pendingRequests.removeValue(forKey: key) {
             cont.resume(throwing: ACPConnectionError.timeout)
+        }
+    }
+
+    /// 发送失败时恢复对应 pending request，避免无响应悬挂。
+    private func failPendingRequest(key: String, error: Error) {
+        if let cont = pendingRequests.removeValue(forKey: key) {
+            cont.resume(throwing: error)
         }
     }
 

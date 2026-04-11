@@ -7,6 +7,17 @@ import Foundation
 @Suite("DirectSessionCoordinator")
 @MainActor
 struct DirectSessionCoordinatorTests {
+    private final class MockAuthService: AuthServiceProtocol, @unchecked Sendable {
+        var isLoggedIn: Bool = false
+        var currentUser: AuthUser?
+        func validAccessToken() async throws -> String { "test-token" }
+        func refreshAccessToken() async throws {}
+        func updateCurrentUser(_ user: AuthUser) {
+            currentUser = user
+        }
+        func fetchAccount() async throws {}
+    }
+
 
     // MARK: - 辅助工厂
 
@@ -180,6 +191,59 @@ struct DirectSessionCoordinatorTests {
         #expect(coordinator.state.activeAgent?.name == "Codex")
         #expect(coordinator.state.activeAgent?.type == .codex)
         #expect(await probes.firstDisconnectCount() == 1)
+    }
+
+    @Test("rotateAfterContextBreak 复用原有 relay 上下文")
+    func rotateAfterContextBreak_reusesOriginalRelayContext() async throws {
+        let relay = RelayConnection(serverID: UUID(), authService: MockAuthService())
+        let captured = LockedBox<[Bool]>([])
+        let coordinator = DirectSessionCoordinator { agent, _, relayConnection in
+            captured.withValue { $0.append(relayConnection != nil) }
+            return FakeDirectAgentSession(
+                agentInfo: agent,
+                displayName: "OpenCode",
+                connectError: Optional<Error>.none,
+                probe: SessionProbe()
+            )
+        }
+        let agent = AgentInfo(type: .opencode, path: "/usr/bin/opencode", version: nil)
+
+        await coordinator.connect(agent: agent, cwd: "/root/test", relayConnection: relay)
+        let rotated = await coordinator.rotateAfterContextBreak()
+
+        #expect(rotated)
+        #expect(captured.withValue { $0 } == [true, true])
+    }
+
+    @Test("sendPrompt 在断连前已收到流式文本时直接产出回复")
+    func sendPrompt_surfacesStreamedReplyBeforeDisconnectError() async throws {
+        let (coordinator, _) = makeCoordinator(outcomes: [
+            .success(displayName: "OpenCode", promptBehavior: .streamThenDisconnect)
+        ])
+        let agent = AgentInfo(type: .opencode, path: "/usr/bin/opencode", version: nil)
+
+        var events: [DirectSessionEvent] = []
+        let collectTask = Task {
+            for await event in coordinator.events {
+                events.append(event)
+            }
+        }
+
+        await coordinator.connect(agent: agent, cwd: "/root/test")
+        await coordinator.sendPromptAndWait("Hi")
+        try? await Task.sleep(for: .milliseconds(100))
+
+        let assistantMessages = events.compactMap { event -> ConchTalk.Message? in
+            if case .messageReady(let msg) = event, msg.role == .assistant { return msg }
+            return nil
+        }
+
+        #expect(assistantMessages.contains {
+            $0.content == "partial reply" && $0.reasoningContent == "thinking"
+        })
+        #expect(assistantMessages.contains { $0.content.hasPrefix("Error:") } == false)
+
+        collectTask.cancel()
     }
 
     @Test("disconnect 将协调器重置为 idle")

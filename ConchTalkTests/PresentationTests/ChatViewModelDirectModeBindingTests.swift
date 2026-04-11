@@ -115,6 +115,32 @@ struct ChatViewModelDirectModeBindingTests {
         #expect(!vm.isStreaming)
     }
 
+    @Test("handleDirectSessionEvent lifecycleChanged executing 为直连模式插入 loading 占位")
+    func handleEvent_lifecycleExecutingAppendsLoadingPlaceholder() async throws {
+        let store = try ChatViewModelTestSupport.makeInMemoryStore()
+        let server = TestFixtures.makeServer()
+        let vm = ChatViewModelTestSupport.makeViewModel(server: server, store: store)
+
+        await vm.handleDirectSessionEvent(.lifecycleChanged(.executing))
+
+        #expect(vm.messages.contains { $0.role == .assistant && $0.isLoading })
+    }
+
+    @Test("handleDirectSessionEvent assistant messageReady 会移除 loading 占位")
+    func handleEvent_assistantMessageReadyRemovesLoadingPlaceholder() async throws {
+        let store = try ChatViewModelTestSupport.makeInMemoryStore()
+        let server = TestFixtures.makeServer()
+        let vm = ChatViewModelTestSupport.makeViewModel(server: server, store: store)
+
+        vm.messages.append(Message(role: .assistant, content: "", isLoading: true, source: .directAgent(agentName: "Kimi Code CLI")))
+
+        let assistantMsg = Message(role: .assistant, content: "hello", source: .directAgent(agentName: "Kimi Code CLI"))
+        await vm.handleDirectSessionEvent(.messageReady(assistantMsg))
+
+        #expect(vm.messages.filter { $0.isLoading }.isEmpty)
+        #expect(vm.messages.last?.content == "hello")
+    }
+
     @Test("handleDirectSessionEvent lifecycleChanged idle 清除 processing 和 agentStreamEvents")
     func handleEvent_lifecycleIdleClearsState() async throws {
         let store = try ChatViewModelTestSupport.makeInMemoryStore()
@@ -183,4 +209,3 @@ struct ChatViewModelDirectModeBindingTests {
         return (coordinator, pool)
     }
 }
-

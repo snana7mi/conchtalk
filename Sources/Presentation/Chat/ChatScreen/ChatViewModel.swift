@@ -32,6 +32,8 @@ final class ChatViewModel {
     var isReasoningActive: Bool = false
     /// 流式滚动触发计数器，每次流式回调递增，供 ScrollTriggerView 监听以触发滚动。
     var streamingScrollTrigger: UInt = 0
+    /// 直连模式流式滚动节流任务，避免每个 chunk 都触发一次 UI 滚动更新。
+    var directStreamScrollTask: Task<Void, Never>?
     /// 工具执行过程中的实时输出文本，供 UI 在加载气泡中展示命令执行进度。
     /// `nil` = 无工具执行，`""` = 工具已启动但尚无输出，非空 = 有输出内容。
     var liveToolOutput: String? = nil
@@ -409,6 +411,26 @@ final class ChatViewModel {
         liveToolOutput = nil
         agentStreamEvents = []
         isAgentExecuting = false
+        directStreamScrollTask?.cancel()
+        directStreamScrollTask = nil
+    }
+
+    /// 直连模式执行中插入占位 assistant 消息，让流式事件有渲染载体。
+    func ensureDirectModeLoadingMessage() {
+        guard !messages.contains(where: { $0.isLoading }) else { return }
+        let source = directModePresentation.agentName.map { MessageSource.directAgent(agentName: $0) }
+        messages.append(Message(role: .assistant, content: "", isLoading: true, source: source))
+    }
+
+    /// 节流 direct mode 的滚动触发，避免每个 token 都驱动一次 ScrollView 更新。
+    func scheduleDirectStreamScroll() {
+        guard directStreamScrollTask == nil else { return }
+        directStreamScrollTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard let self, !Task.isCancelled else { return }
+            self.streamingScrollTrigger &+= 1
+            self.directStreamScrollTask = nil
+        }
     }
 
     /// 从 SwiftData 重新加载当前服务器消息。
@@ -482,6 +504,9 @@ final class ChatViewModel {
     func handleDirectSessionEvent(_ event: DirectSessionEvent) async {
         switch event {
         case .messageReady(let msg):
+            if msg.role == .assistant {
+                removeLoadingMessages()
+            }
             messages.append(msg)
             try? await store.addMessage(msg, toServer: serverID)
             streamingScrollTrigger &+= 1
@@ -490,20 +515,35 @@ final class ChatViewModel {
             case .executing:
                 isAgentExecuting = true
                 isStreaming = true
+                ensureDirectModeLoadingMessage()
             case .connected:
                 isAgentExecuting = false
                 isStreaming = false
+                directStreamScrollTask?.cancel()
+                directStreamScrollTask = nil
+                removeLoadingMessages()
             case .idle:
                 isAgentExecuting = false
                 isStreaming = false
                 isProcessing = false
+                directStreamScrollTask?.cancel()
+                directStreamScrollTask = nil
+                removeLoadingMessages()
                 agentStreamEvents = []
             default:
                 break
             }
         case .streamUpdate(let agentEvent):
-            agentStreamEvents.append(agentEvent)
-            streamingScrollTrigger &+= 1
+            if case .text(let text) = agentEvent,
+               case .text(let previous)? = agentStreamEvents.last {
+                agentStreamEvents[agentStreamEvents.count - 1] = .text(previous + text)
+            } else if case .thinking(let text) = agentEvent,
+                      case .thinking(let previous)? = agentStreamEvents.last {
+                agentStreamEvents[agentStreamEvents.count - 1] = .thinking(previous + text)
+            } else {
+                agentStreamEvents.append(agentEvent)
+            }
+            scheduleDirectStreamScroll()
         case .contextSummaryReady(let summary):
             let aiMsg = Message(role: .system, content: summary, systemMessageType: .aiContext)
             messages.append(aiMsg)

@@ -116,6 +116,10 @@ actor FakeDirectAgentSession: DirectAgentSessionType {
             try await withCheckedThrowingContinuation { continuation in
                 promptContinuation = continuation
             }
+        case .streamThenDisconnect:
+            updateHandler?(.agentThoughtChunk(.text(TextContent(text: "thinking"))))
+            updateHandler?(.agentMessageChunk(.text(TextContent(text: "partial reply"))))
+            throw ACPConnectionError.disconnected
         }
     }
 
@@ -160,6 +164,7 @@ enum SessionFactoryOutcome {
 enum PromptBehavior {
     case succeedImmediate
     case waitForDisconnect
+    case streamThenDisconnect
 }
 
 enum ConnectBehavior {

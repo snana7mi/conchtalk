@@ -65,6 +65,30 @@ struct ChatViewModelTaskFlowTests {
         #expect(viewModel.isProcessing == true)
     }
 
+    @Test("sendMessage 在直连模式发送后清空输入框")
+    func sendMessage_directModeClearsInputText() async throws {
+        let store = try ChatViewModelTestSupport.makeInMemoryStore()
+        let server = TestFixtures.makeServer()
+        try await store.saveServer(server)
+
+        let factory: DirectSessionCoordinator.SessionFactory = makeCoordinatorSessionFactory(
+            [.success(displayName: "OpenCode", promptBehavior: .waitForDisconnect)],
+            probes: SessionProbePool()
+        )
+        let coordinator = DirectSessionCoordinator(sessionFactory: factory)
+
+        let viewModel = ChatViewModelTestSupport.makeViewModel(server: server, store: store)
+        viewModel.directSessionCoordinator = coordinator
+
+        let agent = AgentInfo(type: .opencode, path: "/usr/bin/opencode", version: nil)
+        await coordinator.connect(agent: agent, cwd: "/tmp/work")
+
+        viewModel.inputText = "What can u help me"
+        viewModel.sendMessage()
+
+        #expect(viewModel.inputText.isEmpty)
+    }
+
     @Test("clearTransientStreamingState + clearPendingInteractionState 会清理瞬时状态")
     func clearState_clearsTransientStreamingAndPendingState() async throws {
         let store = try ChatViewModelTestSupport.makeInMemoryStore()

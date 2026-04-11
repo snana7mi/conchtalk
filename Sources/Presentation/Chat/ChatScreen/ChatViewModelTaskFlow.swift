@@ -9,6 +9,9 @@ extension ChatViewModel {
 
         // 直连模式：消息走 ACP（通过 DirectSessionCoordinator）
         if directSessionCoordinator.hasActiveSession {
+            inputText = ""
+            clearAttachments()
+            error = nil
             directSessionCoordinator.sendPrompt(trimmedText)
             return
         }
