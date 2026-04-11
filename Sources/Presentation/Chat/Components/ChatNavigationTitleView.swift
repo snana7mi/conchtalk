@@ -98,9 +98,9 @@ struct ChatNavigationTitleView: View {
         }
 
         // 已连接：尝试拼接地理位置
-        let connectedText = String(localized: "Status.Connected", bundle: LanguageSettings.currentBundle)
+        let connectedText = String(localized: "Connected", bundle: LanguageSettings.currentBundle)
         if let code = countryCode,
-           let country = Locale.current.localizedString(forRegionCode: code) {
+           let country = LanguageSettings.currentLocale.localizedString(forRegionCode: code) {
             return "\(country) · \(connectedText)"
         }
         return connectedText

@@ -617,7 +617,7 @@ struct ConchTalkApp: App {
 
     private func cleanupDisconnectedServers(serverIDs: [UUID], shouldResetNavigation: Bool) async {
         guard let container else { return }
-        let timestamp = Date.now.formatted(date: .omitted, time: .shortened)
+        let timestamp = Date.now.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(LanguageSettings.currentLocale))
         let disconnectMsg = Message(
             role: .system,
             content: String(localized: "Connection lost, please reconnect to server", bundle: LanguageSettings.currentBundle) + " (\(timestamp))",

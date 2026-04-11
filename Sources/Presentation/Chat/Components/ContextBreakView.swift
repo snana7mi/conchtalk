@@ -24,7 +24,7 @@ struct ContextBreakView: View {
     }
 
     private var labelText: String {
-        let timeString = timestamp.formatted(date: .abbreviated, time: .shortened)
+        let timeString = timestamp.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(LanguageSettings.currentLocale))
         return String(localized: "Context cleared · \(timeString)", bundle: LanguageSettings.currentBundle)
     }
 }

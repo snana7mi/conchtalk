@@ -121,7 +121,7 @@ extension ChatViewModel {
         isConnected = false
         // 注销 RelaySSHClient
         taskCoordinator.removeRelayClient(for: serverID)
-        let timestamp = Date.now.formatted(date: .abbreviated, time: .standard)
+        let timestamp = Date.now.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(LanguageSettings.currentLocale))
         let msg = Message(role: .system, content: String(localized: "Relay disconnected", bundle: LanguageSettings.currentBundle) + " (\(timestamp))", systemMessageType: .disconnected)
         messages.append(msg)
         try? await store.addMessage(msg, toServer: serverID)
@@ -367,7 +367,7 @@ extension ChatViewModel {
 
         // 重载消息（任务取消期间可能有部分内容落盘）
         await reloadMessagesFromStore()
-        let timestamp = Date.now.formatted(date: .abbreviated, time: .standard)
+        let timestamp = Date.now.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(LanguageSettings.currentLocale))
         let msg = Message(role: .system, content: String(localized: "SSH disconnected", bundle: LanguageSettings.currentBundle) + " (\(timestamp))", systemMessageType: .disconnected)
         messages.append(msg)
         try? await store.addMessage(msg, toServer: serverID)

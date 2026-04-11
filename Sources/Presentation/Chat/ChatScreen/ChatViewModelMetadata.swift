@@ -12,7 +12,7 @@ extension ChatViewModel {
 
     /// 追加一条系统消息到消息列表并持久化。
     func appendSystemMessage(_ text: String, type: Message.SystemMessageType) {
-        let timestamp = Date.now.formatted(date: .abbreviated, time: .standard)
+        let timestamp = Date.now.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(LanguageSettings.currentLocale))
         let msg = Message(role: .system, content: text + " (\(timestamp))", systemMessageType: type)
         messages.append(msg)
         Task { [store, serverID] in

@@ -171,7 +171,7 @@ struct ChatView: View {
 
     /// 自定义导航栏 header，替代系统 toolbar 实现左对齐大标题。
     private var chatHeaderBar: some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 14) {
             // 返回按钮：返回服务器列表，保持当前连接/模式不变
             Button {
                 dismiss()
