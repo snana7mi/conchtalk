@@ -20,6 +20,9 @@ struct BuiltContext: Sendable {
 /// 组装发送给 AI 的完整上下文：system prompt + 记忆 + 对话历史。
 /// 根据 maxContextTokens 估算 token 预算，标记是否需要触发上下文压缩。
 struct ContextBuilder: Sendable {
+    /// 触发压缩的剩余 token 阈值，与 ContextCompactor.compactionThreshold 对齐。
+    static let compactionReserve = 20_000
+
     private let memoryContextProvider: any MemoryContextProvider
     private let tokenEstimator: TokenEstimator
 
@@ -53,13 +56,14 @@ struct ContextBuilder: Sendable {
         let fixedTokens = tokenEstimator.estimateTokens(systemPrompt)
             + (memoryContext.isEmpty ? 0 : tokenEstimator.estimateTokens(memoryContext))
 
-        // 剩余预算分配给历史消息
-        let historyBudget = maxContextTokens - fixedTokens
-        let needsCompaction = historyBudget < 0
-
-        // 估算历史消息 token 总数
+        // 估算历史消息 token 总数（含 toolOutput / reasoning）
         let historyTokens = estimateMessagesTokens(messages)
         let estimatedTokens = fixedTokens + historyTokens
+
+        // 需要压缩的判定必须把历史消息算进去：剩余预算（窗口 - 实际总量）不足以
+        // 容纳本轮输入 + 期望输出时即触发。reserve 与 ContextCompactor.compactionThreshold 对齐，
+        // 避免两层阈值各自为政。旧实现只用 fixedTokens 判定，历史无限增长也几乎永不触发。
+        let needsCompaction = (maxContextTokens - estimatedTokens) < Self.compactionReserve
 
         return BuiltContext(
             systemPrompt: systemPrompt,
@@ -70,10 +74,10 @@ struct ContextBuilder: Sendable {
         )
     }
 
-    /// 估算消息列表的 token 总数。
+    /// 估算消息列表的 token 总数（含 toolOutput / reasoningContent）。
     private func estimateMessagesTokens(_ messages: [Message]) -> Int {
         messages.reduce(0) { total, msg in
-            total + tokenEstimator.estimateTokens(msg.content)
+            total + tokenEstimator.estimateTokens(for: msg)
         }
     }
 }

@@ -26,8 +26,6 @@ nonisolated enum MessageBuilder {
             if msg.role == .system && msg.systemMessageType == .error { continue }
             // contextBreak 仅作为上下文分割标记，不发送给 AI
             if msg.role == .system && msg.systemMessageType == .contextBreak { continue }
-            // relayStatus 为 relay 连接状态噪音，不发送给 AI
-            if msg.role == .system && msg.systemMessageType == .relayStatus { continue }
 
             let roundDistance = roundDistances[msg.id] ?? 0
 
@@ -165,8 +163,6 @@ nonisolated enum MessageBuilder {
         case .skillLoaded:
             return "Skill loaded"
         case .contextBreak:
-            return ""
-        case .relayStatus:
             return ""
         case .error, .aiContext, .none:
             return msg.content

@@ -6,7 +6,6 @@ struct ChatView: View {
     @State var viewModel: ChatViewModel
     var authService: AuthService
     var subscriptionService: SubscriptionService
-    var relayActivityTracker: RelayActivityTracker
     /// 断开连接后的回调（清除 ViewModel 缓存等）。
     var onDisconnect: ((UUID) -> Void)?
     @Environment(\.dismiss) private var dismiss
@@ -33,10 +32,7 @@ struct ChatView: View {
         applyPresentations(to: chatContent)
         .navigationTitle("")
         .navigationDestination(isPresented: $showServerInfo) {
-            if let client: SSHClientProtocol = viewModel.usesRelay
-                ? viewModel.relaySSHClient
-                : viewModel.sshManager.getClient(for: viewModel.serverID)
-            {
+            if let client: SSHClientProtocol = viewModel.sshManager.getClient(for: viewModel.serverID) {
                 ServerInfoView(server: viewModel.server, sshClient: client)
             } else {
                 ContentUnavailableView(
@@ -61,21 +57,12 @@ struct ChatView: View {
                 viewModel.attachObserver()
             }
 
-            // Relay 灵动岛追踪：进入聊天页
-            if viewModel.usesRelay {
-                relayActivityTracker.serverDidEnter(viewModel.serverID, serverName: viewModel.server.name)
-            }
-
             healthCheckActive = true
             await loadUserAvatar()
         }
         .onDisappear {
             healthCheckActive = false
             viewModel.detachObserver()
-            // Relay 灵动岛追踪：离开聊天页，启动 5 分钟倒计时
-            if viewModel.usesRelay {
-                relayActivityTracker.serverDidLeave(viewModel.serverID)
-            }
             // Shell channel 和直连会话保持活跃（系统返回手势不销毁）
             // 用户可在对话列表中滑动销毁，或手动退出直连模式
         }
@@ -161,7 +148,7 @@ struct ChatView: View {
                     onCancelConnect: { viewModel.directSessionCoordinator.cancelConnecting() },
                 isSpeechAvailable: viewModel.isSpeechAvailable,
                 speechState: viewModel.speechState,
-                hideAttachments: viewModel.usesRelay,
+                hideAttachments: false,
                 onMicTap: { Task { await viewModel.toggleSpeechRecognition() } }
             )
         }

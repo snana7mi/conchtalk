@@ -18,6 +18,7 @@ final class ServerModel {
     var permissionLevelRaw: String = "followGlobal"
     // 服务器有效期，nil 表示无期限
     var expirationDate: Date?
+    /// 已废弃的连接模式字段：保留为 dormant 列（不读不写），仅为避免 SwiftData schema 迁移。
     var connectionModeRaw: String = "direct"
     var createdAt: Date
 
@@ -66,8 +67,7 @@ final class ServerModel {
             authMethod = .password
         }
         let serverPermissionLevel = ServerPermissionLevel(rawValue: permissionLevelRaw) ?? .followGlobal
-        let connectionMode = ServerConnectionMode(rawValue: connectionModeRaw) ?? .direct
-        return Server(id: id, name: name, host: host, port: port, username: username, authMethod: authMethod, groupID: group?.id, countryCode: countryCode, iconData: iconData, lastConnectedAt: lastConnectedAt, permissionLevel: serverPermissionLevel, expirationDate: expirationDate, connectionMode: connectionMode)
+        return Server(id: id, name: name, host: host, port: port, username: username, authMethod: authMethod, groupID: group?.id, countryCode: countryCode, iconData: iconData, lastConnectedAt: lastConnectedAt, permissionLevel: serverPermissionLevel, expirationDate: expirationDate)
     }
 
     /// 从领域层 `Server` 构建持久化模型。
@@ -82,7 +82,6 @@ final class ServerModel {
             authRaw = "privateKey:\(keyID)"
         }
         let model = ServerModel(id: server.id, name: server.name, host: server.host, port: server.port, username: server.username, authMethodRaw: authRaw, countryCode: server.countryCode, iconData: server.iconData, lastConnectedAt: server.lastConnectedAt, permissionLevelRaw: server.permissionLevel.rawValue, expirationDate: server.expirationDate)
-        model.connectionModeRaw = server.connectionMode.rawValue
         return model
     }
 }

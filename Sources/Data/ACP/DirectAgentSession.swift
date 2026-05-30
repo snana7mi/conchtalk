@@ -14,7 +14,6 @@ import NIOFoundationCompat
 actor DirectAgentSession: DirectAgentSessionType {
     let agentInfo: AgentInfo  // Domain 层的 AgentInfo
     nonisolated(unsafe) private let sshClient: SSHClient?
-    private let relayConnection: RelayConnection?
 
     private var agentConnection: (any AgentConnection)?
     private var updateHandler: (@Sendable (SessionUpdate) -> Void)?
@@ -44,10 +43,8 @@ actor DirectAgentSession: DirectAgentSessionType {
         case codex
     }
 
-    /// 根据 AgentType 和连接模式决定使用哪种 Connection。
-    /// relay 模式下所有 agent 统一走 ACP 协议。
-    nonisolated static func connectionType(for agentType: AgentType, isRelay: Bool = false) -> ConnectionType {
-        if isRelay { return .acp }
+    /// 根据 AgentType 决定使用哪种 Connection。
+    nonisolated static func connectionType(for agentType: AgentType) -> ConnectionType {
         switch agentType {
         case .claude: return .claudeCode
         case .codex: return .codex
@@ -55,10 +52,9 @@ actor DirectAgentSession: DirectAgentSessionType {
         }
     }
 
-    init(agentInfo: AgentInfo, sshClient: SSHClient?, relayConnection: RelayConnection? = nil) {
+    init(agentInfo: AgentInfo, sshClient: SSHClient?) {
         self.agentInfo = agentInfo
         self.sshClient = sshClient
-        self.relayConnection = relayConnection
     }
 
     /// 设置流式更新回调。
@@ -108,14 +104,12 @@ actor DirectAgentSession: DirectAgentSessionType {
         } else if let sshClient {
             resolvedCwd = await Self.resolveHomeDirectory(sshClient: sshClient)
         } else {
-            // relay 模式下无 SSH client，使用 ~ 作为默认工作目录
             resolvedCwd = "~"
         }
 
-        // 根据代理类型和连接模式创建对应的 Connection
-        let isRelay = relayConnection != nil
-        let connType = Self.connectionType(for: agentInfo.type, isRelay: isRelay)
-        print("[DirectAgentSession] Creating connection: type=\(connType), agent=\(agentInfo.type.rawValue), cwd=\(resolvedCwd), relay=\(isRelay)")
+        // 根据代理类型创建对应的 Connection
+        let connType = Self.connectionType(for: agentInfo.type)
+        print("[DirectAgentSession] Creating connection: type=\(connType), agent=\(agentInfo.type.rawValue), cwd=\(resolvedCwd)")
 
         let connection: any AgentConnection
         switch connType {
@@ -124,7 +118,7 @@ actor DirectAgentSession: DirectAgentSessionType {
         case .codex:
             connection = CodexConnection(sshClient: sshClient!)
         case .acp:
-            connection = ACPAgentConnection(sshClient: sshClient, agentInfo: agentInfo, relayConnection: relayConnection)
+            connection = ACPAgentConnection(sshClient: sshClient, agentInfo: agentInfo)
         }
 
         // 设置回调（必须在 connect() 前注册，避免丢失握手期间的通知）

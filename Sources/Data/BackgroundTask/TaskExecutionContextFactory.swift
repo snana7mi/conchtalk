@@ -16,9 +16,6 @@ struct TaskExecutionContextFactory {
     private let memoryService: MemoryService?
     private let store: SwiftDataStore
 
-    /// Relay 模式下注册的 RelaySSHClient（keyed by serverID）。
-    private var relayClients: [UUID: RelaySSHClient] = [:]
-
     init(
         sshManager: SSHSessionManager,
         toolRegistry: ToolRegistryProtocol,
@@ -35,24 +32,9 @@ struct TaskExecutionContextFactory {
         self.store = store
     }
 
-    // MARK: - Relay Client Management
-
-    /// 注册 Relay SSH 客户端（瘦 Relay 模式替代 NIOSSHClient）。
-    mutating func registerRelayClient(_ client: RelaySSHClient, for serverID: UUID) {
-        relayClients[serverID] = client
-    }
-
-    /// 移除 Relay SSH 客户端。
-    mutating func removeRelayClient(for serverID: UUID) {
-        relayClients.removeValue(forKey: serverID)
-    }
-
-    /// 获取指定服务器的 SSH 客户端（优先 Relay，回退 NIO）。
+    /// 获取指定服务器的 SSH 客户端。
     func getClient(for serverID: UUID) -> (any SSHClientProtocol)? {
-        if let relayClient = relayClients[serverID] {
-            return relayClient
-        }
-        return sshManager.getClient(for: serverID)
+        sshManager.getClient(for: serverID)
     }
 
     // MARK: - Context Construction
@@ -80,14 +62,9 @@ struct TaskExecutionContextFactory {
     // MARK: - Tool Registry
 
     /// 构建任务级工具注册表，按需注入记忆读写工具。
-    /// Relay 模式下排除 UploadFileTool（文件上传需 SSH SFTP 通道，Relay 不支持）。
     func makeTaskToolRegistry(serverID: UUID) -> ToolRegistryProtocol {
-        let isRelay = relayClients[serverID] != nil
-        let filteredBaseTools = isRelay
-            ? toolRegistry.tools.filter { $0.name != "upload_file" }
-            : toolRegistry.tools
         return ToolRegistryFactory.makeTaskRegistry(
-            baseTools: filteredBaseTools,
+            baseTools: toolRegistry.tools,
             serverID: serverID,
             memoryService: memoryService
         )

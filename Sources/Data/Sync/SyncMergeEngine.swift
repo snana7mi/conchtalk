@@ -24,9 +24,14 @@ actor SyncMergeEngine {
         case .server:
             let remote = try decoder.decode(SwiftDataStore.SyncableServer.self, from: jsonData)
             let count = try await store.mergeRemoteServer(remote)
-            // 恢复密码到 Keychain
+            // 恢复密码到 Keychain。写回失败必须可见：否则元数据已合并、凭据却没落地，
+            // 新设备会出现「有 server 但连不上（密码缺失）」且无任何线索。
             if let password = remote.password, !remote.isDeleted {
-                try? keychainService.savePassword(password, forServer: remote.id)
+                do {
+                    try keychainService.savePassword(password, forServer: remote.id)
+                } catch {
+                    print("[SyncMergeEngine] 密码写回 Keychain 失败 server=\(remote.id): \(error)")
+                }
             }
             return (merged: count, conflicts: 0)
         case .message:
@@ -35,9 +40,13 @@ actor SyncMergeEngine {
         case .sshKey:
             let remote = try decoder.decode(SwiftDataStore.SyncableSSHKey.self, from: jsonData)
             let count = try await store.mergeRemoteSSHKey(remote)
-            // 恢复 SSH 私钥到 Keychain
+            // 恢复 SSH 私钥到 Keychain。写回失败必须可见（理由同密码恢复）。
             if let privateKeyData = remote.privateKeyData, !remote.isDeleted {
-                try? keychainService.saveSSHKey(privateKeyData, withID: remote.id.uuidString)
+                do {
+                    try keychainService.saveSSHKey(privateKeyData, withID: remote.id.uuidString)
+                } catch {
+                    print("[SyncMergeEngine] SSH 私钥写回 Keychain 失败 key=\(remote.id): \(error)")
+                }
             }
             return (merged: count, conflicts: 0)
         case .serverGroup:

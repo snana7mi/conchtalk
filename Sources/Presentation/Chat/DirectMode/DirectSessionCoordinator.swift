@@ -29,7 +29,7 @@ enum DirectSessionEvent: Sendable {
 @Observable
 @MainActor
 final class DirectSessionCoordinator {
-    typealias SessionFactory = @Sendable (_ agent: AgentInfo, _ sshClient: SSHClient?, _ relayConnection: RelayConnection?) -> any DirectAgentSessionType
+    typealias SessionFactory = @Sendable (_ agent: AgentInfo, _ sshClient: SSHClient?) -> any DirectAgentSessionType
 
     // MARK: - 公开状态
 
@@ -52,13 +52,12 @@ final class DirectSessionCoordinator {
     private var suppressedDisconnectSessionIDs: Set<ObjectIdentifier> = []
     private var activeAgentInfo: AgentInfo?
     private var lastSSHClient: SSHClient?
-    private var lastRelayConnection: RelayConnection?
 
     // MARK: - Init
 
     init(
-        sessionFactory: @escaping SessionFactory = { agent, sshClient, relayConnection in
-            DirectAgentSession(agentInfo: agent, sshClient: sshClient, relayConnection: relayConnection)
+        sessionFactory: @escaping SessionFactory = { agent, sshClient in
+            DirectAgentSession(agentInfo: agent, sshClient: sshClient)
         }
     ) {
         let (stream, continuation) = AsyncStream.makeStream(of: DirectSessionEvent.self)
@@ -99,17 +98,16 @@ final class DirectSessionCoordinator {
 
     /// 连接到指定 agent。
     /// - Parameter currentMessageCount: 当前消息列表长度，用于后续上下文摘要提取。
-    func connect(agent: AgentInfo, cwd: String? = nil, sshClient: SSHClient? = nil, relayConnection: RelayConnection? = nil, currentMessageCount: Int = 0) async {
+    func connect(agent: AgentInfo, cwd: String? = nil, sshClient: SSHClient? = nil, currentMessageCount: Int = 0) async {
         beginConnecting(to: agent)
         state.cwd = cwd
         state.directModeStartMessageCount = currentMessageCount
         lastSSHClient = sshClient
-        lastRelayConnection = relayConnection
 
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.connectSession(agent: agent, cwd: cwd, sshClient: sshClient, relayConnection: relayConnection)
+                _ = try await self.connectSession(agent: agent, cwd: cwd, sshClient: sshClient)
             } catch is CancellationError {
                 self.resetToIdle()
             } catch {
@@ -289,8 +287,7 @@ final class DirectSessionCoordinator {
             _ = try await connectSession(
                 agent: agent,
                 cwd: state.cwd,
-                sshClient: lastSSHClient,
-                relayConnection: lastRelayConnection
+                sshClient: lastSSHClient
             )
             return true
         } catch {
@@ -423,7 +420,6 @@ final class DirectSessionCoordinator {
         activeAgentInfo = nil
         directSession = nil
         lastSSHClient = nil
-        lastRelayConnection = nil
         eventContinuation.yield(.lifecycleChanged(.idle))
     }
 
@@ -437,10 +433,9 @@ final class DirectSessionCoordinator {
     private func connectSession(
         agent: AgentInfo,
         cwd: String?,
-        sshClient: SSHClient?,
-        relayConnection: RelayConnection? = nil
+        sshClient: SSHClient?
     ) async throws -> String {
-        let session = sessionFactory(agent, sshClient, relayConnection)
+        let session = sessionFactory(agent, sshClient)
         await installSessionHandlers(on: session)
 
         do {

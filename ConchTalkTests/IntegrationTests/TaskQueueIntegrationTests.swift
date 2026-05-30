@@ -7,7 +7,7 @@ import Testing
 /// TaskQueueIntegrationTests：
 /// 验证 TaskExecutionCoordinator 的任务排队、串行执行与取消调度行为，
 /// 使用真实 AI 服务和 MockSSH 客户端进行集成测试。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 @MainActor
 struct TaskQueueIntegrationTests {
 

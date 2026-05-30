@@ -27,11 +27,8 @@ final class DependencyContainer {
     let audioPermissionManager: AudioPermissionManager
     let speechRecognitionService: SpeechRecognitionService
     let metricsPoller: ServerMetricsPoller
-    let relayActivityTracker: RelayActivityTracker
     let syncService: SyncService
     let subscriptionService: SubscriptionService
-    let relayTokenService: RelayTokenService
-    let dlcInstaller: DLCInstaller
 
     // MARK: - 新架构协调器
 
@@ -141,7 +138,6 @@ final class DependencyContainer {
         self.speechRecognitionService = SpeechRecognitionService(permissionManager: audioPermMgr)
 
         self.metricsPoller = ServerMetricsPoller(sshManager: sshMgr)
-        self.relayActivityTracker = RelayActivityTracker()
 
         // Cloud Sync
         let syncCrypto = SyncCryptoService(keychainService: keychainSvc)
@@ -154,10 +150,6 @@ final class DependencyContainer {
 
         // Subscription（RevenueCat 管理购买，webhook 更新 tier）
         self.subscriptionService = SubscriptionService(authService: authSvc)
-
-        // Relay（中转模式 token 管理）
-        self.relayTokenService = RelayTokenService(authService: authSvc)
-        self.dlcInstaller = DLCInstaller(relayTokenService: relayTokenService, sshManager: sshMgr)
 
         // 新架构协调器图装配
         let notifSvc = notificationService
@@ -209,9 +201,7 @@ final class DependencyContainer {
             memoryReader: memoryService,
             retainService: retainService,
             speechCoordinator: SpeechInputCoordinator(speechRecognitionService: speechRecognitionService),
-            authService: authService,
-            relayTokenService: relayTokenService,
-            dlcInstaller: dlcInstaller
+            authService: authService
         )
         chatViewModelCache[server.id] = vm
         return vm
@@ -229,7 +219,7 @@ final class DependencyContainer {
 
     /// makeServerListViewModel：构建服务器列表页面的视图模型实例。
     func makeServerListViewModel() -> ServerListViewModel {
-        ServerListViewModel(store: store, keychainService: keychainService, relayTokenService: relayTokenService)
+        ServerListViewModel(store: store, keychainService: keychainService)
     }
 
     /// makeSSHKeyManagementViewModel：构建 SSH 密钥管理页面的视图模型实例。

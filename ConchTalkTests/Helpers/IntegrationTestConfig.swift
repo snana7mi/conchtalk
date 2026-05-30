@@ -48,6 +48,12 @@ struct IntegrationTestConfig: Sendable, Codable {
         return loadFromEnvironment()
     }
 
+    /// Swift Testing 没有 XCTest 风格的运行时 XCTSkip；集成测试通过 suite trait
+    /// 在 discovery 阶段禁用，避免缺少外部服务器/API 配置时记录失败。
+    static var isAvailable: Bool {
+        load() != nil
+    }
+
     /// 从 JSON 配置文件加载。利用 `#filePath` 在编译时获取源码路径，推算配置文件位置。
     private static func loadFromFile() -> IntegrationTestConfig? {
         // #filePath → .../ConchTalkTests/Helpers/IntegrationTestConfig.swift

@@ -37,14 +37,12 @@ struct ServerListView: View {
                     Section(entry.group?.name ?? String(localized: "Ungrouped", bundle: LanguageSettings.currentBundle)) {
                         ForEach(entry.servers) { server in
                             let isSSHConnected = sshManager.activeConnectionIDs.contains(server.id)
-                            let isDLCActive = DLCSettings.isEffectivelyEnabled(for: server.id) && viewModel.daemonOnlineServers.contains(server.id)
                             Button {
                                 onSelectServer(server)
                             } label: {
-                                ServerRowView(server: server, isDLCActive: isDLCActive)
+                                ServerRowView(server: server)
                             }
-                            .modifier(GlowBorderModifier(isActive: isSSHConnected && !isDLCActive))
-                            .modifier(DLCGlowBorderModifier(isActive: isDLCActive))
+                            .modifier(GlowBorderModifier(isActive: isSSHConnected))
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     Task { await viewModel.deleteServer(server) }
@@ -136,7 +134,6 @@ struct ServerListView: View {
 /// ServerRowView：负责界面渲染与用户交互响应。
 struct ServerRowView: View {
     let server: Server
-    var isDLCActive: Bool = false
 
     @ViewBuilder
     private var serverIcon: some View {
@@ -172,17 +169,6 @@ struct ServerRowView: View {
             serverIcon
                 .frame(width: 40, height: 40)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(alignment: .topLeading) {
-                    if isDLCActive {
-                        Text("DLC")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 3)
-                            .padding(.vertical, 1)
-                            .background(.purple, in: Capsule())
-                            .offset(x: -4, y: -4)
-                    }
-                }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name)
@@ -191,12 +177,6 @@ struct ServerRowView: View {
                 Text("\(server.username)@\(server.host):\(server.port)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                if isDLCActive {
-                    Text(String(localized: "DLC Agent Running", bundle: LanguageSettings.currentBundle))
-                        .font(.caption2)
-                        .foregroundStyle(.purple)
-                }
             }
 
             Spacer()

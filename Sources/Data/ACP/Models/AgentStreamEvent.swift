@@ -55,7 +55,7 @@ nonisolated enum AgentStreamEvent: Codable, Sendable, Equatable {
             return .toolCall(
                 name: tc.title ?? tc.kind?.rawValue ?? "tool",
                 arguments: "",
-                status: tc.status.rawValue
+                status: tc.status?.rawValue ?? "pending"
             )
 
         case .toolCallUpdate(let details):

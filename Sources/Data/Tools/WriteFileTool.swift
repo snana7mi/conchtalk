@@ -63,10 +63,17 @@ nonisolated struct WriteFileTool: ToolProtocol, @unchecked Sendable {
             throw ToolError.invalidArguments("Append mode is not supported for base64 encoding")
         }
 
-        // 写入前备份
+        // 写入前备份：用户显式开启时，备份失败必须可见，不能静默吞错。
         if createBackup {
-            if let existingData = try? await sshClient.sftpReadFile(path: path) {
-                try? await sshClient.sftpWriteFile(path: path + ".bak", data: existingData)
+            do {
+                let existingData = try await sshClient.sftpReadFile(path: path)
+                try await sshClient.sftpWriteFile(path: path + ".bak", data: existingData)
+            } catch {
+                // 读不到原文件通常意味着首次写入（文件不存在），此时无需备份；
+                // 但若文件确实存在（读/写 .bak 失败），属于真实备份失败，必须上报。
+                if (try? await sshClient.sftpFileSize(path: path)) != nil {
+                    throw ToolError.executionFailed("create_backup requested but backup failed: \(error.localizedDescription)")
+                }
             }
         }
 
@@ -79,23 +86,29 @@ nonisolated struct WriteFileTool: ToolProtocol, @unchecked Sendable {
             let size = try await sshClient.sftpFileSize(path: path)
             return ToolExecutionResult(output: "Written to \(path) successfully (\(size) bytes)")
         } else {
-            // 文本模式：SSH heredoc
-            let op = append ? ">>" : ">"
-            let delimiter = "CONCHTALK_EOF_\(UUID().uuidString.prefix(8))"
-            let command = "cat <<'\(delimiter)' \(op) \(shellEscape(path))\n\(content)\n\(delimiter)"
+            // 文本模式：走 SFTP 二进制安全写入，避免 heredoc 分隔符碰撞 / shell 注入 /
+            // 结尾多余换行等问题（旧实现用 `cat <<'DELIM'`，content 含与分隔符相同的行会截断）。
+            guard let contentData = content.data(using: .utf8) else {
+                throw ToolError.invalidArguments("Content is not valid UTF-8 text")
+            }
 
-            // 自动创建父目录
+            // 自动创建父目录（SFTP 写入不会自动建目录）
             let dir = (path as NSString).deletingLastPathComponent
             if !dir.isEmpty && dir != "/" {
                 _ = try await sshClient.execute(command: "mkdir -p \(shellEscape(dir))")
             }
 
-            let output = try await sshClient.execute(command: command)
-            let verify = try await sshClient.execute(command: "wc -c < \(shellEscape(path))")
-            let byteCount = verify.trimmingCharacters(in: .whitespacesAndNewlines)
+            let dataToWrite: Data
+            if append {
+                let existing = (try? await sshClient.sftpReadFile(path: path)) ?? Data()
+                dataToWrite = existing + contentData
+            } else {
+                dataToWrite = contentData
+            }
+            try await sshClient.sftpWriteFile(path: path, data: dataToWrite)
+            let size = try await sshClient.sftpFileSize(path: path)
             let verb = append ? "Appended to" : "Written to"
-            let result = output.isEmpty ? "\(verb) \(path) successfully (\(byteCount) bytes)" : output
-            return ToolExecutionResult(output: result)
+            return ToolExecutionResult(output: "\(verb) \(path) successfully (\(size) bytes)")
         }
     }
 }

@@ -338,7 +338,6 @@ struct MessageBubbleView: View {
         case .commandDenied:   "xmark.circle.fill"
         case .skillLoaded:     "wand.and.stars"
         case .aiContext:       nil  // 不在 UI 中显示
-        case .relayStatus:    nil  // 不在 UI 中显示
         case .contextBreak:   "scissors"  // 上下文断点图标
         case nil:              nil
         }
@@ -356,7 +355,6 @@ struct MessageBubbleView: View {
         case .commandDenied:   .red
         case .skillLoaded:     .secondary
         case .aiContext:       .clear  // 不在 UI 中显示
-        case .relayStatus:    .clear  // 不在 UI 中显示
         case .contextBreak:   .secondary  // 上下文断点颜色
         case .info, nil:       .secondary
         }

@@ -143,6 +143,7 @@ enum SyncCryptoError: LocalizedError {
     case keychainReadFailed(OSStatus)
     case keychainSaveFailed(OSStatus)
     case masterKeyNotFound
+    case unknownEntityType(String)
 
     var errorDescription: String? {
         switch self {
@@ -150,6 +151,7 @@ enum SyncCryptoError: LocalizedError {
         case .keychainReadFailed(let s): "Keychain read failed: \(s)"
         case .keychainSaveFailed(let s): "Keychain save failed: \(s)"
         case .masterKeyNotFound: "Master key not found in Keychain"
+        case .unknownEntityType(let entityType): "Unknown sync entity type: \(entityType)"
         }
     }
 }

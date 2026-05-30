@@ -30,4 +30,18 @@ nonisolated struct TokenEstimator: Sendable {
         if asciiRun > 0 { tokens += max(asciiRun / 4, 1) }
         return tokens
     }
+
+    /// 估算单条消息发送给 AI 时实际占用的 token。
+    /// 不仅算 content，还要算 toolOutput（命令原始 stdout，agentic loop 里通常是最大负载）
+    /// 与 reasoningContent（推理链）——这两块都会进入上下文，旧实现只算 content 会严重低估。
+    func estimateTokens(for message: Message) -> Int {
+        var total = estimateTokens(message.content)
+        if let output = message.toolOutput, !output.isEmpty {
+            total += estimateTokens(output)
+        }
+        if let reasoning = message.reasoningContent, !reasoning.isEmpty {
+            total += estimateTokens(reasoning)
+        }
+        return total
+    }
 }

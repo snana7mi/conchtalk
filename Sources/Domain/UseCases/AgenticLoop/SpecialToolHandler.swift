@@ -85,4 +85,33 @@ nonisolated enum SpecialToolHandler {
         }
     }
 
+    // MARK: - activate_skill
+
+    /// 若 `activate_skill` 执行成功，构造对应的 skillLoaded 系统消息（否则返回 nil）。
+    /// 把工具特定的输出解析从通用 agentic loop 中抽离（职责单一）；解析失败记 debug 日志，
+    /// 而非旧实现里 `try?` 的完全静默——若 skill 工具改了输出格式，至少能在日志里看到。
+    static func skillLoadedMessage(forToolName toolName: String, output: String) -> Message? {
+        guard toolName == "activate_skill" else { return nil }
+        guard let data = output.data(using: .utf8) else { return nil }
+        do {
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                #if DEBUG
+                print("[SpecialToolHandler] activate_skill 输出不是 JSON 对象，跳过 skillLoaded")
+                #endif
+                return nil
+            }
+            // status 非 activated（如激活失败）或缺 displayName 时不插入 skillLoaded（属正常分支）
+            guard json["status"] as? String == "activated",
+                  let displayName = json["displayName"] as? String else {
+                return nil
+            }
+            return Message(role: .system, content: displayName, systemMessageType: .skillLoaded)
+        } catch {
+            #if DEBUG
+            print("[SpecialToolHandler] activate_skill 输出 JSON 解析失败: \(error)")
+            #endif
+            return nil
+        }
+    }
+
 }

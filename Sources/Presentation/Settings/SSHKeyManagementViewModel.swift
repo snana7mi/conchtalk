@@ -35,14 +35,23 @@ final class SSHKeyManagementViewModel {
         defer { isGenerating = false }
 
         do {
+            // 密钥生成（尤其 RSA-4096 的 SecKeyCreateRandomKey）是 CPU 密集同步操作，可耗时数秒。
+            // 本 VM 默认 MainActor 隔离，直接同步执行会冻结 UI——放到后台 detached 执行，
+            // GeneratedKeyPair 是 Sendable，可安全跨隔离返回。
             let result: GeneratedKeyPair
             switch type {
             case .ed25519:
-                result = SSHKeyGenerationService.generateEd25519()
+                result = await Task.detached(priority: .userInitiated) {
+                    SSHKeyGenerationService.generateEd25519()
+                }.value
             case .rsa4096:
-                result = try SSHKeyGenerationService.generateRSA4096()
+                result = try await Task.detached(priority: .userInitiated) {
+                    try SSHKeyGenerationService.generateRSA4096()
+                }.value
             case .ecdsaP256:
-                result = SSHKeyGenerationService.generateECDSAP256()
+                result = await Task.detached(priority: .userInitiated) {
+                    SSHKeyGenerationService.generateECDSAP256()
+                }.value
             case .unknown:
                 return nil
             }

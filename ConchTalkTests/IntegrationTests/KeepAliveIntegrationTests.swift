@@ -7,7 +7,7 @@ import Testing
 /// 验证 NIOSSHClient 的 keep-alive 机制能保持空闲连接存活，
 /// 以及断线后 isConnected 状态正确更新。
 /// 这些测试需要较长时间运行（60+ 秒）。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct KeepAliveIntegrationTests {
 
     // MARK: - keepAlivePings

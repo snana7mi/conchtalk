@@ -6,7 +6,7 @@ import Testing
 /// ContextCompressionIntegrationTests：
 /// 验证当对话历史足够长时，AI 服务能触发上下文压缩（`.contextCompressing` delta），
 /// 以及压缩后 AI 仍能引用早期对话内容。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct ContextCompressionIntegrationTests {
 
     // MARK: - contextCompactsOnLongConversation

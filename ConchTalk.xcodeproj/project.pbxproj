@@ -10,6 +10,8 @@
 		24370E842F43044700E6DB92 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 240D8B962F42F3C900FBFD13 /* Citadel */; };
 		24B1C0032F630000000ACP01 /* ACPModel in Frameworks */ = {isa = PBXBuildFile; productRef = 24B1C0042F630000000ACP02 /* ACPModel */; };
 		24D38EDE2F7E3FB300C97364 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 24D38EDD2F7E3FB300C97364 /* RevenueCat */; };
+		24D38EE02F90000000C97364 /* LLMGatewayKit in Frameworks */ = {isa = PBXBuildFile; productRef = 24D38EDF2F90000000C97364 /* LLMGatewayKit */; };
+		24D38EE12F90000000C97364 /* LLMGatewayKit in Frameworks */ = {isa = PBXBuildFile; productRef = 24D38EDF2F90000000C97364 /* LLMGatewayKit */; };
 		24FE2D0F2F7A50640001CA77 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24FE2CF02F7A4F8C0001CA77 /* WidgetKit.framework */; };
 		24FE2D102F7A50640001CA77 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24FE2CF22F7A4F8C0001CA77 /* SwiftUI.framework */; };
 		24FE2D212F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -97,6 +99,7 @@
 				24370E842F43044700E6DB92 /* Citadel in Frameworks */,
 				24B1C0032F630000000ACP01 /* ACPModel in Frameworks */,
 				24D38EDE2F7E3FB300C97364 /* RevenueCat in Frameworks */,
+				24D38EE02F90000000C97364 /* LLMGatewayKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +116,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				24D38EE12F90000000C97364 /* LLMGatewayKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -185,6 +189,7 @@
 				240D8B962F42F3C900FBFD13 /* Citadel */,
 				24B1C0042F630000000ACP02 /* ACPModel */,
 				24D38EDD2F7E3FB300C97364 /* RevenueCat */,
+				24D38EDF2F90000000C97364 /* LLMGatewayKit */,
 			);
 			productName = ConchTalk;
 			productReference = 240D8B852F42F3C800FBFD13 /* ConchTalk.app */;
@@ -207,6 +212,7 @@
 			);
 			name = ConchTalkLiveActivityExtension;
 			packageProductDependencies = (
+				24D38EDF2F90000000C97364 /* LLMGatewayKit */,
 			);
 			productName = ConchTalkLiveActivityExtension;
 			productReference = 24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */;
@@ -270,6 +276,7 @@
 				240D8B952F42F3C900FBFD13 /* XCRemoteSwiftPackageReference "citadel" */,
 				24B1C0052F630000000ACP03 /* XCRemoteSwiftPackageReference "swift-acp" */,
 				24D38EDC2F7E3FB300C97364 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+				24D38EE22F90000000C97364 /* XCRemoteSwiftPackageReference "LLMGatewayKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 240D8B862F42F3C800FBFD13 /* Products */;
@@ -761,6 +768,14 @@
 				minimumVersion = 5.67.0;
 			};
 		};
+		24D38EE22F90000000C97364 /* XCRemoteSwiftPackageReference "LLMGatewayKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/snana7mi/LLMGatewayKit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.1.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -778,6 +793,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 24D38EDC2F7E3FB300C97364 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
 			productName = RevenueCat;
+		};
+		24D38EDF2F90000000C97364 /* LLMGatewayKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 24D38EE22F90000000C97364 /* XCRemoteSwiftPackageReference "LLMGatewayKit" */;
+			productName = LLMGatewayKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

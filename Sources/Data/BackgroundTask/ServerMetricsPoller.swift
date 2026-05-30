@@ -63,7 +63,7 @@ final class ServerMetricsPoller {
         await onMetricsUpdated?()
     }
 
-    /// 两次采样间隔 1 秒取 delta，与 daemon 的 metrics/collector.go 逻辑一致。
+    /// 两次采样间隔 1 秒取 delta，计算 CPU 占用率。
     private func fetchMetrics(client: NIOSSHClient) async throws -> Metrics {
         let command = """
             if [ -f /proc/stat ]; then \

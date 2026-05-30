@@ -22,7 +22,7 @@ import Testing
 /// 注意：由于 Citadel SSHClient 的连接生命周期管理，在 `.serialized` 测试套件中
 /// 快速连续创建/关闭 SSH 连接可能导致 "Already closed" 错误。
 /// 每个测试独立创建连接并在使用完毕后同步断开，避免 defer 中的异步 disconnect 竞争。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct NativeAgentConnectionTests {
 
     // MARK: - 辅助方法

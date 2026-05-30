@@ -273,6 +273,10 @@ actor NIOSSHClient: SSHClientProtocol {
 
                 do {
                     let stream = try await client.executeCommandStream(command)
+                    // 跨 chunk 累积字节：Citadel 的 chunk 边界是任意字节切分，一个多字节
+                    // UTF-8 字符（中/日文 3-4 字节）可能被切在两块之间。按字节累积、只解码到
+                    // 最后一个完整 UTF-8 边界，不完整的尾字节留到下一块，避免乱码/丢字。
+                    var pending = [UInt8]()
                     for try await chunk in stream {
                         try Task.checkCancellation()
                         let buffer: ByteBuffer
@@ -282,9 +286,16 @@ actor NIOSSHClient: SSHClientProtocol {
                         case .stderr(let buf):
                             buffer = buf
                         }
-                        if let text = String(data: Data(buffer: buffer), encoding: .utf8), !text.isEmpty {
+                        pending.append(contentsOf: buffer.readableBytesView)
+                        let text = Self.drainDecodableUTF8(&pending)
+                        if !text.isEmpty {
                             continuation.yield(text)
                         }
+                    }
+                    // flush 残留字节（即便末尾不完整也输出，避免静默丢弃）
+                    if !pending.isEmpty {
+                        let text = String(decoding: pending, as: UTF8.self)
+                        if !text.isEmpty { continuation.yield(text) }
                     }
                     continuation.finish()
                 } catch {
@@ -293,6 +304,34 @@ actor NIOSSHClient: SSHClientProtocol {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// 从累积字节缓冲解码出尽可能长的完整 UTF-8 文本，把末尾不完整的多字节序列留在
+    /// buffer 里待下一块拼接。从末尾回扫最多 4 字节定位最后一个 lead byte，若其后字节
+    /// 不足以构成完整序列则在该处截断、保留尾巴。
+    nonisolated private static func drainDecodableUTF8(_ buffer: inout [UInt8]) -> String {
+        guard !buffer.isEmpty else { return "" }
+        var cut = buffer.count
+        var i = buffer.count - 1
+        var scanned = 0
+        while i >= 0 && scanned < 4 {
+            let b = buffer[i]
+            if b & 0xC0 != 0x80 {  // 非 continuation byte（10xxxxxx）即 lead byte
+                let expected: Int
+                if b & 0x80 == 0 { expected = 1 }
+                else if b & 0xE0 == 0xC0 { expected = 2 }
+                else if b & 0xF0 == 0xE0 { expected = 3 }
+                else if b & 0xF8 == 0xF0 { expected = 4 }
+                else { expected = 1 }  // 非法 lead，当 1 字节处理
+                cut = (buffer.count - i < expected) ? i : buffer.count
+                break
+            }
+            i -= 1
+            scanned += 1
+        }
+        let head = Array(buffer[0..<cut])
+        buffer = Array(buffer[cut...])
+        return String(decoding: head, as: UTF8.self)
     }
 
     // MARK: - SFTP
@@ -379,6 +418,10 @@ actor NIOSSHClient: SSHClientProtocol {
     private func startKeepAlive() {
         cancelKeepAlive()
         keepAliveTask = Task { [weak self] in
+            // 容忍瞬时网络抖动：连续多次失败才判定断线，避免移动网络下一次丢包/慢响应
+            // 就误杀健康连接、触发整轮重连（重建 client + 重跑探测）。
+            let maxConsecutiveFailures = 3
+            var consecutiveFailures = 0
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: .seconds(30))
@@ -386,13 +429,18 @@ actor NIOSSHClient: SSHClientProtocol {
                     break
                 }
                 guard let self else { break }
-                guard let client = await self.client else { break }
+                guard await self.client != nil else { break }
                 do {
-                    _ = try await Self.executeOnClient(client, command: "echo __keepalive__")
+                    // 走带超时的 execute（10s），防止探测命令本身挂死拖住保活循环。
+                    _ = try await self.execute(command: "echo __keepalive__", timeout: 10)
+                    consecutiveFailures = 0
                 } catch {
-                    print("[SSH] Keep-alive failed: \(error)")
-                    await self.markDisconnected()
-                    break
+                    consecutiveFailures += 1
+                    print("[SSH] Keep-alive failed (\(consecutiveFailures)/\(maxConsecutiveFailures)): \(error)")
+                    if consecutiveFailures >= maxConsecutiveFailures {
+                        await self.markDisconnected()
+                        break
+                    }
                 }
             }
         }

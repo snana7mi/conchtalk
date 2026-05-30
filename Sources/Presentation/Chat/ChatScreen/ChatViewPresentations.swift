@@ -85,16 +85,7 @@ extension ChatView {
                         bundle: LanguageSettings.currentBundle
                     )
                 }
-            }
-            .alert(
-                String(localized: "DLC Agent Installation Failed", bundle: LanguageSettings.currentBundle),
-                isPresented: $viewModel.showDLCInstallFailed
-            ) {
-                Button(String(localized: "OK", bundle: LanguageSettings.currentBundle)) {}
-            } message: {
-                Text(viewModel.dlcInstallError)
-            }
-    }
+            }    }
 
     private func applyFileImportPresentations<Content: View>(to content: Content) -> some View {
         content

@@ -37,7 +37,7 @@ final class TaskExecutionCoordinator {
     // MARK: - Dependencies
 
     /// 上下文工厂（构建 server context、tool registry、permission）。
-    private var contextFactory: TaskExecutionContextFactory
+    private let contextFactory: TaskExecutionContextFactory
 
     /// AI 服务。
     private let aiService: AIServiceProtocol
@@ -96,18 +96,6 @@ final class TaskExecutionCoordinator {
 
     deinit {
         eventContinuation.finish()
-    }
-
-    // MARK: - Public API: Relay Client
-
-    /// 注册 Relay SSH 客户端（瘦 Relay 模式，替代 NIOSSHClient）。
-    func registerRelayClient(_ client: RelaySSHClient, for serverID: UUID) {
-        contextFactory.registerRelayClient(client, for: serverID)
-    }
-
-    /// 移除 Relay SSH 客户端。
-    func removeRelayClient(for serverID: UUID) {
-        contextFactory.removeRelayClient(for: serverID)
     }
 
     // MARK: - Public API: Background Keep Alive
@@ -320,7 +308,7 @@ final class TaskExecutionCoordinator {
             cleanupTask(serverID: serverID)
         }
 
-        // 获取 SSH 客户端（优先 Relay，回退 NIO）
+        // 获取 SSH 客户端
         guard let sshClient = contextFactory.getClient(for: serverID) else {
             try? await messageRepository.appendSystemMessage(
                 String(localized: "Error: \(SSHError.notConnected.localizedDescription)",
@@ -369,13 +357,14 @@ final class TaskExecutionCoordinator {
         // 执行 agentic loop
         do {
             let filteredMessages = messages.filter { !$0.isLoading }
-            let resultMessages = try await Task.detached {
-                try await useCase.execute(
-                    userMessage: text,
-                    conversationHistory: filteredMessages,
-                    serverContext: serverContext
-                )
-            }.value
+            // 直接 await：useCase 是 nonisolated，本就在 MainActor 之外执行，无需 Task.detached；
+            // 而 detached 会切断结构化并发的取消传播——外层 Task 被取消时，detached 子任务收不到
+            // 取消标志，AI/SSH 实际工作仍会继续跑。直接 await 让取消正确传到 execute 内部。
+            let resultMessages = try await useCase.execute(
+                userMessage: text,
+                conversationHistory: filteredMessages,
+                serverContext: serverContext
+            )
 
             guard lifecycleManager.hasActiveTask(for: serverID) else { return }
 

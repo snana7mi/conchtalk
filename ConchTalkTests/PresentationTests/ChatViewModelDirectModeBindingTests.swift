@@ -179,6 +179,9 @@ struct ChatViewModelDirectModeBindingTests {
 
         let initialTrigger = vm.streamingScrollTrigger
         await vm.handleDirectSessionEvent(.streamUpdate(.text("hello")))
+        try await waitUntil(timeout: .milliseconds(500)) {
+            vm.streamingScrollTrigger > initialTrigger
+        }
 
         #expect(vm.agentStreamEvents.count == 1)
         #expect(vm.streamingScrollTrigger > initialTrigger)
@@ -207,5 +210,16 @@ struct ChatViewModelDirectModeBindingTests {
         let factory: DirectSessionCoordinator.SessionFactory = makeCoordinatorSessionFactory(outcomes, probes: pool)
         let coordinator = DirectSessionCoordinator(sessionFactory: factory)
         return (coordinator, pool)
+    }
+
+    private func waitUntil(timeout: Duration, condition: @MainActor @escaping () -> Bool) async throws {
+        let start = ContinuousClock.now
+        while !condition() {
+            if ContinuousClock.now - start > timeout {
+                Issue.record("Condition did not become true before timeout")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 }

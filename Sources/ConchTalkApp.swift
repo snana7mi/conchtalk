@@ -35,9 +35,6 @@ struct ConchTalkApp: App {
     @State private var triggerSettingsSave = false
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Relay Live Activity 快照定时刷新任务（后台时每 30 秒更新一次）。
-    @State private var relaySnapshotTask: Task<Void, Never>?
-
     // 连接网关
     @State private var gatewayState: ConnectionGatewayState = .idle
     @State private var connectTask: Task<Void, Never>?
@@ -80,14 +77,6 @@ struct ConchTalkApp: App {
         }
         .task {
             let c = await DependencyContainer.create()
-            c.relayActivityTracker.onAllExpired = { [weak c] in
-                guard let c else { return }
-                if c.taskExecutionCoordinator.activeTaskServerIDs.isEmpty
-                    && c.sshManager.activeConnectionIDs.isEmpty {
-                    c.taskExecutionCoordinator.liveActivity.endGlobalActivity()
-                    c.metricsPoller.stop()
-                }
-            }
             container = c
         }
     }
@@ -129,7 +118,6 @@ struct ConchTalkApp: App {
                                 viewModel: container.makeChatViewModel(for: server),
                                 authService: container.authService,
                                 subscriptionService: container.subscriptionService,
-                                relayActivityTracker: container.relayActivityTracker,
                                 onDisconnect: { serverID in
                                     container.removeChatViewModel(for: serverID)
                                 }
@@ -312,10 +300,7 @@ struct ConchTalkApp: App {
                 container.taskExecutionCoordinator.onForegroundResume()
                 // 回前台：停止轮询，结束 Live Activity（无活跃 AI 任务时）
                 container.metricsPoller.stop()
-                relaySnapshotTask?.cancel()
-                relaySnapshotTask = nil
-                if container.taskExecutionCoordinator.activeTaskServerIDs.isEmpty
-                    && !container.relayActivityTracker.hasActiveServers {
+                if container.taskExecutionCoordinator.activeTaskServerIDs.isEmpty {
                     container.taskExecutionCoordinator.liveActivity.endGlobalActivity()
                 }
                 Task {
@@ -327,8 +312,7 @@ struct ConchTalkApp: App {
             } else if newPhase == .background {
                 container.taskExecutionCoordinator.beginBackgroundKeepAlive()
                 let hasSSH = !container.sshManager.activeConnectionIDs.isEmpty
-                let hasRelay = container.relayActivityTracker.hasActiveServers
-                if hasSSH || hasRelay {
+                if hasSSH {
                     container.taskExecutionCoordinator.liveActivity.startGlobalActivity()
                     container.metricsPoller.start()
                     container.metricsPoller.onMetricsUpdated = {
@@ -336,17 +320,6 @@ struct ConchTalkApp: App {
                     }
                     Task {
                         await self.updateLiveActivitySnapshot()
-                    }
-                    // Relay 服务器 metrics 每 30 秒被动接收，定时刷新快照
-                    if hasRelay {
-                        relaySnapshotTask?.cancel()
-                        relaySnapshotTask = Task {
-                            while !Task.isCancelled {
-                                try? await Task.sleep(for: .seconds(30))
-                                guard !Task.isCancelled else { break }
-                                await self.updateLiveActivitySnapshot()
-                            }
-                        }
                     }
                 }
                 // 云同步：进后台时触发
@@ -420,41 +393,7 @@ struct ConchTalkApp: App {
             ))
         }
 
-        // Relay 服务器 snapshot
-        for serverID in container.relayActivityTracker.activeServerIDs {
-            let serverName = container.relayActivityTracker.serverName(for: serverID) ?? "Relay"
-            let relayMetrics: RelayMetrics?
-            if let vm = container.cachedChatViewModel(for: serverID),
-               let relay = vm.relayConnection {
-                relayMetrics = await relay.latestMetrics
-            } else {
-                relayMetrics = nil
-            }
-            let lastReply: String
-            if let reply = try? await container.store.fetchLastAssistantMessage(forServer: serverID) {
-                lastReply = reply
-            } else {
-                lastReply = ""
-            }
-            snapshots.append(ServerSnapshot(
-                serverID: serverID,
-                serverName: serverName,
-                lastReply: lastReply,
-                cpuUsage: Self.normalizeMetric(relayMetrics?.cpu ?? 0),
-                memoryUsage: Self.normalizeMetric(relayMetrics?.memory ?? 0),
-                connectionSeconds: 0,
-                hasActiveTask: container.taskExecutionCoordinator.hasActiveTask(for: serverID)
-            ))
-        }
-
         container.taskExecutionCoordinator.liveActivity.updateServers(snapshots, force: true)
-    }
-
-    /// Relay metrics 归一化：daemon 恒发 0-100 范围，统一除以 100 转为 0-1。
-    /// 注意：不能用 "> 1" 做范围判断——当实际值为 0.5%（即 daemon 发 0.5）时，
-    /// 0.5 ≤ 1 会被误判为 0-1 范围，直接视为 50%，导致低负载时严重偏高。
-    private static func normalizeMetric(_ value: Double) -> Double {
-        min(max(value / 100.0, 0), 1)
     }
 
     // MARK: - 连接网关
@@ -483,28 +422,6 @@ struct ConchTalkApp: App {
                 vm.isConnected = true
                 selectedServer = server
                 return
-            }
-
-            // DLC relay 路径：daemon 在线时走 WebSocket，跳过 SSH
-            if DLCSettings.isEffectivelyEnabled(for: server.id) {
-                // 检查 daemon 是否在线
-                let daemonOnline: Bool
-                do {
-                    let status = try await container.relayTokenService.getStatus(serverID: server.id)
-                    daemonOnline = status.isDaemonOnline
-                } catch {
-                    daemonOnline = false
-                }
-                if daemonOnline {
-                    guard myGeneration == gatewayGeneration else { return }
-                    gatewayState = .idle
-                    let vm = container.makeChatViewModel(for: server)
-                    await vm.loadMessages()
-                    // relay 连接在 ChatViewModel init 中已创建，触发 connectRelay
-                    await vm.connectRelay()
-                    selectedServer = server
-                    return
-                }
             }
 
             // 显示连接进度
@@ -560,12 +477,7 @@ struct ConchTalkApp: App {
                 // 预加载消息并标记已连接，避免 ConnectionBannerView 闪现导致布局偏移破坏滚动锚点
                 let vm = container.makeChatViewModel(for: server)
                 await vm.loadMessages()
-                // DLC 服务器 SSH 回退成功后，也尝试建立 relay 连接
-                if vm.usesRelay {
-                    await vm.connectRelay()
-                } else {
-                    vm.isConnected = true
-                }
+                vm.isConnected = true
                 selectedServer = server
             }
         }
@@ -618,18 +530,21 @@ struct ConchTalkApp: App {
     private func cleanupDisconnectedServers(serverIDs: [UUID], shouldResetNavigation: Bool) async {
         guard let container else { return }
         let timestamp = Date.now.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(LanguageSettings.currentLocale))
-        let disconnectMsg = Message(
-            role: .system,
-            content: String(localized: "Connection lost, please reconnect to server", bundle: LanguageSettings.currentBundle) + " (\(timestamp))",
-            systemMessageType: .connectionLost
-        )
+        let disconnectContent = String(localized: "Connection lost, please reconnect to server", bundle: LanguageSettings.currentBundle) + " (\(timestamp))"
 
         for serverID in serverIDs {
             // 1. 取消该服务器上的所有 AI 任务
             let activeServerIDs = await container.taskExecutionCoordinator.cancelTasks(forServer: serverID)
 
-            // 2. 仅向有活跃任务的服务器插入断连消息
+            // 2. 仅向有活跃任务的服务器插入断连消息。
+            //    必须每台新建独立 Message（独立 UUID）：addMessage 按全局 ID 幂等去重，
+            //    若复用同一个 disconnectMsg，多台同时断连时只有第一台能写入。
             for sid in activeServerIDs {
+                let disconnectMsg = Message(
+                    role: .system,
+                    content: disconnectContent,
+                    systemMessageType: .connectionLost
+                )
                 try? await container.store.addMessage(disconnectMsg, toServer: sid)
             }
 

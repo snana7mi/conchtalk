@@ -6,7 +6,7 @@ import Testing
 /// AIStreamingIntegrationTests：
 /// 验证 AIProxyService 的流式响应能力，包括基本流式输出、内容拼接、
 /// 工具定义兼容性、错误处理和取消安全性。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct AIStreamingIntegrationTests {
 
     // MARK: - basicStreaming

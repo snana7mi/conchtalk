@@ -92,10 +92,11 @@ enum StreamingToolExecutor {
                     await lastActivity.touch()
                     // 空字符串是心跳 keepalive，不追加到输出
                     guard !chunk.isEmpty else { continue }
-                    accumulated += chunk.strippingANSIEscapes()
+                    let stripped = chunk.strippingANSIEscapes()
+                    accumulated += stripped
 
-                    // 增量解析 ACP 事件（后台线程，不阻塞 MainActor）
-                    let newEvents = parser.parse(newText: accumulated)
+                    // 增量解析 ACP 事件：只传新到达的片段（parser 内部维护残留行缓冲，O(N)）
+                    let newEvents = parser.parse(chunk: stripped)
                     pendingEvents.append(contentsOf: newEvents)
 
                     let now = ContinuousClock.Instant.now

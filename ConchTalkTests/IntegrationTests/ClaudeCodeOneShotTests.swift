@@ -13,7 +13,7 @@ import Testing
 /// 1. 首次调用（无 --resume）获取 system.init + result
 /// 2. 多轮调用（--resume session_id）保持上下文
 /// 3. Shell 转义正确性（prompt 包含单引号）
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct ClaudeCodeOneShotTests {
 
     // MARK: - 辅助方法

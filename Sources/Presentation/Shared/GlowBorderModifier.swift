@@ -48,43 +48,6 @@ struct GlowBorderModifier: ViewModifier {
     }
 }
 
-/// DLCGlowBorderModifier：DLC 代理运行中的彩虹流光边框。
-struct DLCGlowBorderModifier: ViewModifier {
-    let isActive: Bool
-
-    func body(content: Content) -> some View {
-        if isActive {
-            content
-                .listRowBackground(
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.secondary.opacity(0.08))
-                        TimelineView(.animation) { timeline in
-                            let now = timeline.date.timeIntervalSinceReferenceDate
-                            let fraction = now.truncatingRemainder(dividingBy: 3.0) / 3.0
-                            let angle = Angle.degrees(fraction * 360)
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(
-                                    AngularGradient(
-                                        gradient: Gradient(colors: [
-                                            .red, .orange, .yellow, .green,
-                                            .cyan, .blue, .purple, .pink, .red
-                                        ]),
-                                        center: .center,
-                                        angle: angle
-                                    ),
-                                    lineWidth: 2.5
-                                )
-                        }
-                    }
-                    .padding(6)
-                )
-        } else {
-            content
-        }
-    }
-}
-
 /// RainbowAvatarBorder：为 Pro 用户头像添加流动彩虹荧光边框。
 struct RainbowAvatarBorder: ViewModifier {
     let isActive: Bool

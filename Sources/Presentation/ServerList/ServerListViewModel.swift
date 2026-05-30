@@ -19,18 +19,13 @@ final class ServerListViewModel {
     var searchResults: [Server] = []
     var isSearching: Bool { !searchText.isEmpty }
 
-    /// DLC daemon 在线的服务器 ID 集合。
-    var daemonOnlineServers: Set<UUID> = []
-
     private let store: SwiftDataStore
     private let keychainService: any KeychainServiceProtocol
-    private let relayTokenService: RelayTokenService?
 
     /// 初始化视图模型，并注入所需业务依赖。
-    init(store: SwiftDataStore, keychainService: any KeychainServiceProtocol, relayTokenService: RelayTokenService? = nil) {
+    init(store: SwiftDataStore, keychainService: any KeychainServiceProtocol) {
         self.store = store
         self.keychainService = keychainService
-        self.relayTokenService = relayTokenService
     }
 
     /// loadServers：加载并同步当前场景所需数据。
@@ -46,7 +41,10 @@ final class ServerListViewModel {
             if !missing.isEmpty {
                 var changed = false
                 for server in missing {
-                    if let code = IPGeoService.lookupCountryCode(for: server.host) {
+                    // lookupCountryCode 内部走同步阻塞的 getaddrinfo（无超时），本 VM 是 MainActor 隔离，
+                    // 直接调用会卡住主线程数秒——放到后台 detached 执行，结果是 Sendable 的 String?。
+                    let host = server.host
+                    if let code = await Task.detached(priority: .utility, operation: { IPGeoService.lookupCountryCode(for: host) }).value {
                         var updated = server
                         updated.countryCode = code
                         try await store.updateServer(updated)
@@ -66,45 +64,6 @@ final class ServerListViewModel {
         if isSearching {
             await search()
         }
-        // 异步查询 DLC daemon 在线状态
-        await refreshDaemonStatus()
-    }
-
-    /// 查询所有 DLC 启用服务器的 daemon 在线状态（REST API）。
-    func refreshDaemonStatus() async {
-        guard let service = relayTokenService else { return }
-        let dlcServers = servers.filter { DLCSettings.isEffectivelyEnabled(for: $0.id) }
-        guard !dlcServers.isEmpty else {
-            daemonOnlineServers = []
-            return
-        }
-        // 并发拉取原始状态（task group 为非隔离上下文，避免在其中调用 @MainActor 属性）
-        var results: [(UUID, RelayStatusResponse?)] = []
-        await withTaskGroup(of: (UUID, RelayStatusResponse?).self) { group in
-            for server in dlcServers {
-                group.addTask {
-                    do {
-                        let status = try await service.getStatus(serverID: server.id)
-                        return (server.id, status)
-                    } catch {
-                        print("[DLC] refreshDaemonStatus: server=\(server.id), error=\(error)")
-                        return (server.id, nil)
-                    }
-                }
-            }
-            for await result in group {
-                results.append(result)
-            }
-        }
-        // 回到主 actor 上下文后再计算在线状态
-        var online: Set<UUID> = []
-        for (id, status) in results {
-            if let status {
-                print("[DLC] refreshDaemonStatus: server=\(id), status=\(status.status), lastSeen=\(status.lastSeenAt ?? "nil"), online=\(status.isDaemonOnline)")
-                if status.isDaemonOnline { online.insert(id) }
-            }
-        }
-        daemonOnlineServers = online
     }
 
     /// deleteServer：删除目标数据并维护一致性（含 Keychain 密码、主机指纹清理）。
@@ -125,9 +84,10 @@ final class ServerListViewModel {
     /// addServer：追加新数据并更新相关状态。
     func addServer(_ server: Server, password: String?, groupID: UUID?) async {
         do {
-            // 离线查询 IP 所属国家
+            // 离线查询 IP 所属国家（getaddrinfo 阻塞，放后台执行避免冻结主线程）
             var serverWithGeo = server
-            serverWithGeo.countryCode = IPGeoService.lookupCountryCode(for: server.host)
+            let host = server.host
+            serverWithGeo.countryCode = await Task.detached(priority: .utility, operation: { IPGeoService.lookupCountryCode(for: host) }).value
 
             try await store.saveServer(serverWithGeo)
             if let password, case .password = server.authMethod {
@@ -147,8 +107,9 @@ final class ServerListViewModel {
     func updateServer(_ server: Server, password: String?, groupID: UUID?) async {
         do {
             var serverWithGeo = server
-            // 重新查询国家代码；查询失败时保留旧值
-            let newCode = IPGeoService.lookupCountryCode(for: server.host)
+            // 重新查询国家代码；查询失败时保留旧值（getaddrinfo 阻塞，放后台执行）
+            let host = server.host
+            let newCode = await Task.detached(priority: .utility, operation: { IPGeoService.lookupCountryCode(for: host) }).value
             if newCode != nil {
                 serverWithGeo.countryCode = newCode
             }

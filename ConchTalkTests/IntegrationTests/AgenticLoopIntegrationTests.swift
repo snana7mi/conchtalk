@@ -6,7 +6,7 @@ import Testing
 /// AgenticLoopIntegrationTests：
 /// 验证 AI 发起工具调用、执行工具、将结果回传 AI 的完整 agentic loop，
 /// 以及工具安全分级的正确性。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct AgenticLoopIntegrationTests {
 
     // MARK: - Agentic Loop Helper

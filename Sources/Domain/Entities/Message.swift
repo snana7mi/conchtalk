@@ -39,8 +39,6 @@ nonisolated struct Message: Identifiable, Sendable {
         case aiContext
         /// 上下文断点标记，用于分割上下文窗口。
         case contextBreak
-        /// Relay 连接状态消息（如 connected / disconnected），不在聊天界面显示。
-        case relayStatus
     }
 
     /// 初始化消息实体。

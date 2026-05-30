@@ -13,7 +13,7 @@ private typealias AgentInfo = ConchTalk.AgentInfo
 /// 需要真实服务器且安装了相应代理才能运行。
 /// 每个代理的测试可能需要 10-30 秒。
 /// `.serialized` 确保代理连接测试不会并发执行，避免端口冲突或资源争用。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct ACPDirectModeIntegrationTests {
 
     // MARK: - 辅助方法

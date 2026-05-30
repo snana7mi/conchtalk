@@ -9,7 +9,6 @@ import Foundation
 actor ACPAgentConnection: AgentConnection {
     private let sshClient: SSHClient?
     private let agentInfo: AgentInfo
-    private let relayConnection: RelayConnection?
 
     private var connection: ACPClientConnection?
     private var sessionId: SessionId?
@@ -24,10 +23,9 @@ actor ACPAgentConnection: AgentConnection {
     private(set) var modelsInfo: ModelsInfo?
     private(set) var modesInfo: ModesInfo?
 
-    init(sshClient: SSHClient?, agentInfo: AgentInfo, relayConnection: RelayConnection? = nil) {
+    init(sshClient: SSHClient?, agentInfo: AgentInfo) {
         self.sshClient = sshClient
         self.agentInfo = agentInfo
-        self.relayConnection = relayConnection
     }
 
     func setUpdateHandler(_ handler: @escaping @Sendable (SessionUpdate) -> Void) {
@@ -57,19 +55,10 @@ actor ACPAgentConnection: AgentConnection {
             let command = commandCandidates[min(nextCommandIndex, commandCandidates.count - 1)]
             nextCommandIndex += 1
 
-            let transport: any ACPTransport
-            if let relay = self?.relayConnection {
-                transport = await RelayACPTransport(
-                    relayConnection: relay,
-                    agentCommand: command,
-                    cwd: cwd
-                )
-            } else {
-                guard let sshClient else {
-                    throw ACPConnectionError.notConnected
-                }
-                transport = await SSHACPTransport(sshClient: sshClient, agentCommand: command)
+            guard let sshClient else {
+                throw ACPConnectionError.notConnected
             }
+            let transport: any ACPTransport = await SSHACPTransport(sshClient: sshClient, agentCommand: command)
             let requestTimeoutSeconds: TimeInterval = self?.agentInfo.type == .gemini ? 240 : 120
             let candidateConnection = ACPClientConnection(
                 transport: transport,

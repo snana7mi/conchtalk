@@ -73,8 +73,10 @@ nonisolated struct GrepTool: ToolProtocol, @unchecked Sendable {
         }
         grepCmd += " -m \(maxResults) \(escapedPattern) \(escapedPath) 2>/dev/null"
 
-        // 用 || true 兜底：无匹配时 grep/rg 返回非零退出码，不应当作错误
-        let command = "if command -v rg >/dev/null 2>&1; then \(rgCmd) || true; else \(grepCmd) || true; fi"
+        // --max-count / -m 是【每文件】上限；再用末尾的 head 做【总行数】兜底，
+        // 使实际返回行数与 max_results 的声明语义（总匹配行数）一致。
+        // 管道末尾是 head，整体退出码为 0，无需 || true 兜底无匹配的非零退出。
+        let command = "{ if command -v rg >/dev/null 2>&1; then \(rgCmd); else \(grepCmd); fi ; } | head -n \(maxResults)"
 
         let output = try await sshClient.execute(command: command)
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)

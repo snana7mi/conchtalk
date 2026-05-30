@@ -254,17 +254,8 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     history.append(cmdMsg)
                     await onIntermediateMessage?(cmdMsg)
 
-                    // Skill 激活成功时，插入 skillLoaded 系统消息
-                    if toolCall.toolName == "activate_skill",
-                       let data = result.output.data(using: .utf8),
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       json["status"] as? String == "activated",
-                       let displayName = json["displayName"] as? String {
-                        let skillMsg = Message(
-                            role: .system,
-                            content: displayName,
-                            systemMessageType: .skillLoaded
-                        )
+                    // Skill 激活成功时，插入 skillLoaded 系统消息（解析逻辑下沉到 SpecialToolHandler）
+                    if let skillMsg = SpecialToolHandler.skillLoadedMessage(forToolName: toolCall.toolName, output: result.output) {
                         newMessages.append(skillMsg)
                         history.append(skillMsg)
                         await onIntermediateMessage?(skillMsg)

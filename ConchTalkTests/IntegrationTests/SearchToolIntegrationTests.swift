@@ -6,7 +6,7 @@ import Testing
 /// SearchToolIntegrationTests：
 /// 验证 GrepTool、GlobTool 在真实 SSH 环境下的执行结果。
 /// 需要设置环境变量（CT_TEST_HOST 等）才能运行，否则自动跳过。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct SearchToolIntegrationTests {
 
     // MARK: - GrepTool

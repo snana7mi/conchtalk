@@ -100,8 +100,6 @@ final class ChatViewModel {
     var server: Server
     /// 服务器 ID（唯一键，替代旧的 conversationID）。
     var serverID: UUID { server.id }
-    /// 当前服务器是否使用 relay 通道（原生 relay 模式或 DLC 代理模式）。
-    var usesRelay: Bool { server.connectionMode == .relay || DLCSettings.isEffectivelyEnabled(for: server.id) }
     let store: SwiftDataStore
     let sshManager: SSHSessionManager
     let aiService: AIServiceProtocol
@@ -113,26 +111,8 @@ final class ChatViewModel {
     let speechCoordinator: SpeechInputCoordinator
     let authService: AuthServiceProtocol
 
-    // MARK: - Relay 模式
-
-    /// Relay 连接（仅 relay 模式使用）。
-    var relayConnection: RelayConnection?
-    /// Relay SSH 客户端（瘦 Relay 模式，替代 NIOSSHClient）。
-    var relaySSHClient: RelaySSHClient?
-    /// Relay token 服务。
-    let relayTokenService: RelayTokenService?
-    /// Relay 事件消费任务。
-    var relayEventTask: Task<Void, Never>?
-
-    /// DLC 安装器。
-    let dlcInstaller: DLCInstaller?
-    /// DLC 安装失败弹窗状态。
-    var showDLCInstallFailed: Bool = false
-    var dlcInstallError: String = ""
-    var isDLCInstalling: Bool = false
-
     /// 初始化聊天视图模型并注入业务依赖。
-    init(server: Server, store: SwiftDataStore, sshManager: SSHSessionManager, aiService: AIServiceProtocol, toolRegistry: ToolRegistryProtocol, keychainService: KeychainServiceProtocol, taskCoordinator: TaskExecutionCoordinator, memoryReader: MemoryReader, retainService: RetainService, speechCoordinator: SpeechInputCoordinator, authService: AuthServiceProtocol, relayTokenService: RelayTokenService? = nil, dlcInstaller: DLCInstaller? = nil) {
+    init(server: Server, store: SwiftDataStore, sshManager: SSHSessionManager, aiService: AIServiceProtocol, toolRegistry: ToolRegistryProtocol, keychainService: KeychainServiceProtocol, taskCoordinator: TaskExecutionCoordinator, memoryReader: MemoryReader, retainService: RetainService, speechCoordinator: SpeechInputCoordinator, authService: AuthServiceProtocol) {
         self.server = server
         self.store = store
         self.sshManager = sshManager
@@ -144,8 +124,6 @@ final class ChatViewModel {
         self.retainService = retainService
         self.speechCoordinator = speechCoordinator
         self.authService = authService
-        self.relayTokenService = relayTokenService
-        self.dlcInstaller = dlcInstaller
         let iconData = FlagImageRenderer.resolveServerIconData(server: server, size: 300)
         self.serverIconData = iconData
         self.serverIconImage = iconData.flatMap { ImageUtils.makeSwiftUIImage(from: $0) }
@@ -158,31 +136,16 @@ final class ChatViewModel {
         )
         bindCoordinators()
         startDirectSessionEventConsumption()
-
-        // Relay 模式或 DLC 模式：初始化 WebSocket 连接和事件消费
-        if usesRelay {
-            let relay = RelayConnection(serverID: server.id, authService: authService)
-            self.relayConnection = relay
-            self.agentPicker.relayConnection = relay
-
-            // 创建 RelaySSHClient 并注册到 TaskExecutionContextFactory
-            let relaySSHClient = RelaySSHClient(relay: relay, serverID: server.id)
-            self.relaySSHClient = relaySSHClient
-            taskCoordinator.registerRelayClient(relaySSHClient, for: server.id)
-
-            startRelayEventConsumption()
-        }
     }
 
-    /// 启动 relay 事件流消费（与 startDirectSessionEventConsumption 模式一致）。
-    private func startRelayEventConsumption() {
-        guard let relay = relayConnection else { return }
-        relayEventTask = Task { [weak self] in
-            for await event in relay.events {
-                guard let self else { break }
-                self.handleRelayEvent(event)
-            }
-        }
+    /// VM 由 DependencyContainer 按 serverID 缓存，移除时仅从字典删除、不主动 cancel 这些长存任务。
+    /// directEventTask 全程无人取消，普通模式断开后会泄漏。
+    /// deinit 作为安全网，统一取消所有长存任务。用 isolated deinit 在 MainActor 上执行，
+    /// 以合法访问 MainActor 隔离的 Task 属性（普通 nonisolated deinit 无法访问它们）。
+    isolated deinit {
+        directEventTask?.cancel()
+        deferredEnqueueTask?.cancel()
+        directStreamScrollTask?.cancel()
     }
 
     /// 当前会话是否有活跃的后台 AI 任务。
@@ -471,7 +434,6 @@ final class ChatViewModel {
                         agent: agent,
                         cwd: cwd,
                         sshClient: await self.resolveSSHClient(),
-                        relayConnection: self.usesRelay ? self.relayConnection : nil,
                         currentMessageCount: self.messages.count
                     )
                 }

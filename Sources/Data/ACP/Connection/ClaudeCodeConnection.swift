@@ -205,6 +205,13 @@ actor ClaudeCodeConnection: AgentConnection {
         }
     }
 
+    /// 进程 stderr / 非 JSON 噪声的诊断摘要后缀，拼到连接失败错误里方便定位
+    /// （否则只报 "exited without ..."，看不到 claude 真正的报错原因，如鉴权失败）。
+    private var diagnosticSuffix: String {
+        let summary = transport?.diagnosticLog.summary ?? ""
+        return summary.isEmpty ? "" : " Diagnostics: \(summary)"
+    }
+
     // MARK: - Init 阶段（顺序消费迭代器）
 
     /// 等待 system.init 消息（跳过 hook_started / hook_response 等非 init system 消息）。
@@ -224,7 +231,7 @@ actor ClaudeCodeConnection: AgentConnection {
                 print("[ClaudeCodeConnection] waitForInit decode error: \(error)")
             }
         }
-        throw ACPConnectionError.protocolError("Claude Code exited without sending system.init")
+        throw ACPConnectionError.protocolError("Claude Code exited without sending system.init.\(diagnosticSuffix)")
     }
 
     /// 等待 result 消息（初始化阶段用，消费同一个迭代器）。
@@ -239,7 +246,7 @@ actor ClaudeCodeConnection: AgentConnection {
                 return
             }
         }
-        throw ACPConnectionError.protocolError("Claude Code exited without sending result")
+        throw ACPConnectionError.protocolError("Claude Code exited without sending result.\(diagnosticSuffix)")
     }
 
     // MARK: - 持久消息路由

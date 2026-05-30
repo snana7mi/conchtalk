@@ -14,7 +14,7 @@ import Testing
 /// 1. 启动进程 + 立即发送 /cost prompt → 收到 system.init + result
 /// 2. 在已启动的进程中发送第二个 prompt → 收到 assistant + result
 /// 3. 多轮上下文验证：进程保持上下文，能回忆之前的对话
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct ClaudeCodePersistentTests {
 
     // MARK: - 辅助方法

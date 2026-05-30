@@ -25,8 +25,6 @@ struct SettingsView: View {
     @State private var showDisableConfirmation = false
     @State private var suppressSyncOnChange = false
     @State private var showPaywall = false
-    @State private var dlcEnabled = DLCSettings.isGlobalEnabled
-    @State private var showDLCRiskAlert = false
     /// 同步结果一闪而过的提示文字。
     @State private var syncToastMessage: String?
     @State private var syncToastIsError = false
@@ -134,8 +132,6 @@ struct SettingsView: View {
             }
 
             cloudSyncSection
-
-            dlcAgentSection
 
             aiServiceSection
 
@@ -312,63 +308,6 @@ struct SettingsView: View {
             Text(String(localized: "Data is encrypted end-to-end. Only you can decrypt it.", bundle: LanguageSettings.currentBundle))
         }
 
-    }
-
-    // MARK: - DLC Agent Section
-
-    private var dlcAgentSection: some View {
-        Section {
-            Toggle(String(localized: "Enable DLC Agent", bundle: LanguageSettings.currentBundle), isOn: $dlcEnabled)
-                .disabled(!authService.isLoggedIn || !isPaid || !syncEnabled || useLocalConfig)
-                .onChange(of: dlcEnabled) { _, newValue in
-                    if newValue {
-                        showDLCRiskAlert = true
-                    } else {
-                        DLCSettings.isGlobalEnabled = false
-                    }
-                }
-
-            if !authService.isLoggedIn {
-                Text(String(localized: "Sign in to use DLC Agent", bundle: LanguageSettings.currentBundle))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if !isPaid {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(String(localized: "DLC Agent requires a paid subscription", bundle: LanguageSettings.currentBundle))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button(String(localized: "Upgrade to Pro", bundle: LanguageSettings.currentBundle)) {
-                        showPaywall = true
-                    }
-                    .font(.caption)
-                }
-            } else if !syncEnabled {
-                Text(String(localized: "Enable Cloud Sync before using DLC Agent", bundle: LanguageSettings.currentBundle))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if useLocalConfig {
-                Label(
-                    String(localized: "DLC Agent requires built-in AI model", bundle: LanguageSettings.currentBundle),
-                    systemImage: "exclamationmark.triangle"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(String(localized: "DLC Agent", bundle: LanguageSettings.currentBundle))
-        } footer: {
-            Text(String(localized: "DLC Agent installs a daemon on your server for persistent relay connections and direct coding agent access.", bundle: LanguageSettings.currentBundle))
-        }
-        .alert(String(localized: "Enable DLC Agent?", bundle: LanguageSettings.currentBundle), isPresented: $showDLCRiskAlert) {
-            Button(String(localized: "I Understand the Risks", bundle: LanguageSettings.currentBundle)) {
-                DLCSettings.isGlobalEnabled = true
-            }
-            Button(String(localized: "Cancel", bundle: LanguageSettings.currentBundle), role: .cancel) {
-                dlcEnabled = false
-            }
-        } message: {
-            Text(String(localized: "This will automatically install a daemon service on servers you connect to. The daemon requires root/sudo access and registers as a system service.", bundle: LanguageSettings.currentBundle))
-        }
     }
 
     /// 根据同步结果显示一闪而过的 toast 提示。

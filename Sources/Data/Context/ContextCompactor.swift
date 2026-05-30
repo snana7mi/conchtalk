@@ -114,12 +114,18 @@ actor ContextCompactor {
         var recentTokens = 0
         var recentCount = 0
 
-        // 从尾部往前累计，直到超出近期预算
+        // 从尾部往前累计，直到超出近期预算（token 估算含 toolOutput / reasoning）
         for message in messages.reversed() {
-            let tokens = tokenEstimator.estimateTokens(message.content)
+            let tokens = tokenEstimator.estimateTokens(for: message)
             if recentTokens + tokens > recentTokenBudget { break }
             recentTokens += tokens
             recentCount += 1
+        }
+
+        // 兜底：即便最后一条消息本身就超过 recentTokenBudget（如刚贴进来的一大段命令输出），
+        // 也必须至少保留最近一条，否则当前轮上下文会被整体压进摘要、近期段为空。
+        if recentCount == 0 && !messages.isEmpty {
+            recentCount = 1
         }
 
         let splitIndex = messages.count - recentCount
@@ -129,10 +135,22 @@ actor ContextCompactor {
     }
 
     /// 调用 AI 为旧消息列表生成摘要。
+    /// 注意：必须纳入 .command（工具调用）消息——本工程的命令执行结果正是用 .command 角色承载，
+    /// 摘要要求保留「executed commands and their outcomes」，过滤掉它们会丢失关键执行历史。
     private func generateSummary(for messages: [Message]) async -> String {
+        // 单条工具输出可能很大，做长度截断避免摘要请求整体超长。
+        let maxToolOutputChars = 2_000
         let conversationText = messages
-            .filter { $0.role == .user || $0.role == .assistant }
-            .map { "[\($0.role.rawValue)]: \($0.content)" }
+            .filter { $0.role == .user || $0.role == .assistant || $0.role == .command }
+            .map { msg in
+                if msg.role == .command {
+                    let tool = msg.toolCall?.toolName ?? "tool"
+                    let cmd = msg.content.isEmpty ? "" : msg.content
+                    let out = (msg.toolOutput ?? "").prefix(maxToolOutputChars)
+                    return "[command \(tool)]: \(cmd)\n=> \(out)"
+                }
+                return "[\(msg.role.rawValue)]: \(msg.content)"
+            }
             .joined(separator: "\n")
 
         let prompt = """

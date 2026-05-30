@@ -298,7 +298,9 @@ actor CodexConnection: AgentConnection {
             }
         }
 
-        throw ACPConnectionError.protocolError("Codex exited without responding to RPC id=\(expectedId)")
+        let diag = transport.diagnosticLog.summary
+        let suffix = diag.isEmpty ? "" : " Diagnostics: \(diag)"
+        throw ACPConnectionError.protocolError("Codex exited without responding to RPC id=\(expectedId).\(suffix)")
     }
 
     /// 发送 RPC 请求并等待响应（消息路由已启动后使用）。

@@ -2,14 +2,6 @@
 /// 文件说明：Server，定义远端服务器连接配置的领域实体模型。
 import Foundation
 
-/// ServerConnectionMode：定义服务器的连接方式。
-enum ServerConnectionMode: String, Codable, Sendable, CaseIterable {
-    /// 直连 SSH（现有模式）。
-    case direct
-    /// 通过中转服务器连接（Pro 专属）。
-    case relay
-}
-
 /// Server：
 /// 表示一台可连接服务器的核心信息，包括地址、认证方式、分组及最近连接时间。
 struct Server: Identifiable, Codable, Hashable, Sendable {
@@ -26,7 +18,6 @@ struct Server: Identifiable, Codable, Hashable, Sendable {
     var permissionLevel: ServerPermissionLevel
     // 服务器有效期，nil 表示无期限，到期后自动删除服务器及所有关联数据
     var expirationDate: Date?
-    var connectionMode: ServerConnectionMode
 
     /// AuthMethod：定义服务器登录认证方式。
     enum AuthMethod: Codable, Hashable, Sendable {
@@ -43,7 +34,7 @@ struct Server: Identifiable, Codable, Hashable, Sendable {
     ///   - username: 登录用户名。
     ///   - authMethod: 认证方式。
     ///   - groupID: 所属分组标识。
-    init(id: UUID = UUID(), name: String, host: String, port: Int = 22, username: String, authMethod: AuthMethod, groupID: UUID? = nil, countryCode: String? = nil, iconData: Data? = nil, lastConnectedAt: Date? = nil, permissionLevel: ServerPermissionLevel = .followGlobal, expirationDate: Date? = nil, connectionMode: ServerConnectionMode = .direct) {
+    init(id: UUID = UUID(), name: String, host: String, port: Int = 22, username: String, authMethod: AuthMethod, groupID: UUID? = nil, countryCode: String? = nil, iconData: Data? = nil, lastConnectedAt: Date? = nil, permissionLevel: ServerPermissionLevel = .followGlobal, expirationDate: Date? = nil) {
         self.id = id
         self.name = name
         self.host = host
@@ -56,7 +47,6 @@ struct Server: Identifiable, Codable, Hashable, Sendable {
         self.lastConnectedAt = lastConnectedAt
         self.permissionLevel = permissionLevel
         self.expirationDate = expirationDate
-        self.connectionMode = connectionMode
     }
 
     /// 将国家代码转换为国旗 emoji。

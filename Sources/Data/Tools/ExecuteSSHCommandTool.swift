@@ -95,6 +95,11 @@ nonisolated struct ExecuteSSHCommandTool: ToolProtocol, @unchecked Sendable {
         if let regex = try? Regex(dangerousExecPattern), cmd.contains(regex) {
             return true
         }
+        // 命令替换 / 进程替换：$(...)、反引号、<(...)、>(...) 会内嵌任意命令，
+        // 不会被 splitRawSegments 分段，白名单首词判定无法看穿——一律降级需确认。
+        if cmd.contains("$(") || cmd.contains("`") || cmd.contains("<(") || cmd.contains(">(") {
+            return true
+        }
         return false
     }
 
@@ -149,11 +154,12 @@ nonisolated struct ExecuteSSHCommandTool: ToolProtocol, @unchecked Sendable {
 
     // MARK: - Command Parsing Helpers
 
-    /// 将命令按 shell 操作符（`&` `;` `|`）分割为原始段（不跳过 sudo 等前缀）。
-    /// 用于安全检查——`sudo ls` 不应被视为与 `ls` 同等安全。
+    /// 将命令按 shell 操作符（`&` `;` `|`）及换行分割为原始段（不跳过 sudo 等前缀）。
+    /// 用于安全检查——`sudo ls` 不应被视为与 `ls` 同等安全；换行也必须分段，
+    /// 否则 `printf x\nrm -rf ~` 会被首词 `printf` 误判为安全。
     private static func splitRawSegments(_ cmd: String) -> [String] {
         cmd.trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: CharacterSet(charactersIn: "&;|"))
+            .components(separatedBy: CharacterSet(charactersIn: "&;|\n\r"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }

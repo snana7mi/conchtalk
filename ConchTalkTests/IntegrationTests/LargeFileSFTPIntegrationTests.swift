@@ -7,7 +7,7 @@ import Testing
 /// LargeFileSFTPIntegrationTests：
 /// 验证 NIOSSHClient 的 SFTP 大文件读写和分块传输功能，
 /// 包括 1MB/10MB 文件上传、分块进度回调和大文件下载校验。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct LargeFileSFTPIntegrationTests {
 
     // MARK: - Helpers

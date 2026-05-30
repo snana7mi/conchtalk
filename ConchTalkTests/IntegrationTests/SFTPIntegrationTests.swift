@@ -6,7 +6,7 @@ import Testing
 /// SFTPIntegrationTests：
 /// 验证 NIOSSHClient 的 SFTP 读写文件和文件大小查询功能。
 /// 需要设置环境变量（CT_TEST_HOST 等）才能运行，否则自动跳过。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct SFTPIntegrationTests {
 
     // MARK: - Helpers

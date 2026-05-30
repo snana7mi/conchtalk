@@ -94,11 +94,7 @@ struct AddServerView: View {
     @State private var iconData: Data?
     @State private var iconPreviewImage: Image?
     @State private var serverPermissionLevel: ServerPermissionLevel = .followGlobal
-    @State private var dlcOverride: DLCOverrideOption = .followGlobal
     @State private var showPermissiveWarning = false
-    @State private var connectionMode: ServerConnectionMode = .direct
-    @State private var relayInstallCommand: String? = nil
-    @State private var isGeneratingToken: Bool = false
     @State private var hasExpiration = false
     @State private var expirationDate = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
     @State private var previousPermissionLevel: ServerPermissionLevel = .followGlobal
@@ -107,8 +103,6 @@ struct AddServerView: View {
     let groups: [ServerGroup]
     let availableKeys: [SSHKey]
     let keychainService: any KeychainServiceProtocol
-    let relayTokenService: RelayTokenService?
-    let authService: AuthServiceProtocol?
     let onSave: (Server, String?, UUID?) -> Void
 
     /// The server being edited, nil for add mode.
@@ -127,45 +121,25 @@ struct AddServerView: View {
         }
     }
 
-    /// DLCOverrideOption：服务器级别 DLC Agent 覆盖选项。
-    private enum DLCOverrideOption: String, CaseIterable {
-        case followGlobal
-        case enabled
-        case disabled
-
-        var displayName: String {
-            switch self {
-            case .followGlobal: String(localized: "Follow Global", bundle: LanguageSettings.currentBundle)
-            case .enabled: String(localized: "Enabled", bundle: LanguageSettings.currentBundle)
-            case .disabled: String(localized: "Disabled", bundle: LanguageSettings.currentBundle)
-            }
-        }
-    }
-
     private var isEditing: Bool { editingServer != nil }
 
     /// 初始化服务器配置表单并注入回调。
-    init(groups: [ServerGroup], availableKeys: [SSHKey], keychainService: any KeychainServiceProtocol, relayTokenService: RelayTokenService? = nil, authService: AuthServiceProtocol? = nil, onSave: @escaping (Server, String?, UUID?) -> Void) {
+    init(groups: [ServerGroup], availableKeys: [SSHKey], keychainService: any KeychainServiceProtocol, onSave: @escaping (Server, String?, UUID?) -> Void) {
         self.groups = groups
         self.availableKeys = availableKeys
         self.keychainService = keychainService
-        self.relayTokenService = relayTokenService
-        self.authService = authService
         self.onSave = onSave
         self.editingServer = nil
         _globalPermissionLevel = State(initialValue: AISettings.load().permissionLevel)
     }
 
     /// 初始化服务器配置表单并注入回调。
-    init(editing server: Server, groups: [ServerGroup], availableKeys: [SSHKey], keychainService: any KeychainServiceProtocol, relayTokenService: RelayTokenService? = nil, authService: AuthServiceProtocol? = nil, onSave: @escaping (Server, String?, UUID?) -> Void) {
+    init(editing server: Server, groups: [ServerGroup], availableKeys: [SSHKey], keychainService: any KeychainServiceProtocol, onSave: @escaping (Server, String?, UUID?) -> Void) {
         self.groups = groups
         self.availableKeys = availableKeys
         self.keychainService = keychainService
-        self.relayTokenService = relayTokenService
-        self.authService = authService
         self.onSave = onSave
         self.editingServer = server
-        _connectionMode = State(initialValue: server.connectionMode)
         _name = State(initialValue: server.name)
         _host = State(initialValue: server.host)
         _port = State(initialValue: String(server.port))
@@ -189,10 +163,6 @@ struct AddServerView: View {
         case .privateKey(let keyID):
             _authType = State(initialValue: .privateKey)
             _selectedKeyID = State(initialValue: UUID(uuidString: keyID))
-        }
-        // 加载服务器级别 DLC override
-        if let override = DLCSettings.serverOverride(for: server.id) {
-            _dlcOverride = State(initialValue: override ? .enabled : .disabled)
         }
     }
 
@@ -233,72 +203,6 @@ struct AddServerView: View {
                     Task { await handleIconSelection(iconItem) }
                 }
 
-                // 连接方式选择
-                Section {
-                    Picker(String(localized: "Connection Mode", bundle: LanguageSettings.currentBundle), selection: $connectionMode) {
-                        Text(String(localized: "Direct SSH", bundle: LanguageSettings.currentBundle))
-                            .tag(ServerConnectionMode.direct)
-                        HStack {
-                            Text(String(localized: "Relay", bundle: LanguageSettings.currentBundle))
-                            Text("PRO")
-                                .font(.caption2.bold())
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.blue)
-                                .foregroundStyle(.white)
-                                .clipShape(Capsule())
-                        }
-                        .tag(ServerConnectionMode.relay)
-                    }
-                    .onChange(of: connectionMode) { _, newValue in
-                        if newValue == .relay && authService?.currentUser?.tier != "paid" {
-                            connectionMode = .direct
-                        }
-                    }
-                } header: {
-                    Text(String(localized: "Connection", bundle: LanguageSettings.currentBundle))
-                }
-
-                // Relay 配置
-                if connectionMode == .relay {
-                    Section {
-                        TextField(String(localized: "Name", bundle: LanguageSettings.currentBundle), text: $name)
-
-                        if let command = relayInstallCommand {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(String(localized: "Install daemon on your server:", bundle: LanguageSettings.currentBundle))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                Text(command)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .padding(12)
-                                    .background(Color.secondary.opacity(0.1))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                Button(String(localized: "Copy Command", bundle: LanguageSettings.currentBundle)) {
-                                    UIPasteboard.general.string = command
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        } else {
-                            Button {
-                                Task { await generateRelayToken() }
-                            } label: {
-                                if isGeneratingToken {
-                                    ProgressView()
-                                } else {
-                                    Text(String(localized: "Generate Token", bundle: LanguageSettings.currentBundle))
-                                }
-                            }
-                            .disabled(isGeneratingToken || name.isEmpty)
-                        }
-                    } header: {
-                        Text(String(localized: "Relay Setup", bundle: LanguageSettings.currentBundle))
-                    }
-                }
-
-                if connectionMode == .direct {
                 Section(String(localized: "Server Info", bundle: LanguageSettings.currentBundle)) {
                     TextField(String(localized: "Name", bundle: LanguageSettings.currentBundle), text: $name)
                     TextField(String(localized: "Host", bundle: LanguageSettings.currentBundle), text: $host)
@@ -354,8 +258,6 @@ struct AddServerView: View {
                     }
                 }
 
-                } // end if connectionMode == .direct
-
                 Section(String(localized: "Group", bundle: LanguageSettings.currentBundle)) {
                     Picker(String(localized: "Group", bundle: LanguageSettings.currentBundle), selection: $selectedGroupID) {
                         Text(String(localized: "None", bundle: LanguageSettings.currentBundle)).tag(nil as UUID?)
@@ -382,25 +284,6 @@ struct AddServerView: View {
                     }
                 } header: {
                     Text(String(localized: "Permission Level", bundle: LanguageSettings.currentBundle))
-                }
-                Section {
-                    Picker(String(localized: "DLC Agent", bundle: LanguageSettings.currentBundle), selection: $dlcOverride) {
-                        ForEach(DLCOverrideOption.allCases, id: \.self) { option in
-                            Text(verbatim: option.displayName).tag(option)
-                        }
-                    }
-                    .disabled(AISettings.load().useLocalConfig)
-
-                    if AISettings.load().useLocalConfig {
-                        Label(
-                            String(localized: "DLC Agent requires built-in AI model", bundle: LanguageSettings.currentBundle),
-                            systemImage: "exclamationmark.triangle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text(String(localized: "DLC Agent", bundle: LanguageSettings.currentBundle))
                 }
                 Section {
                     Toggle(String(localized: "Expiration", bundle: LanguageSettings.currentBundle), isOn: $hasExpiration)
@@ -455,9 +338,6 @@ struct AddServerView: View {
     }
 
     private var isValid: Bool {
-        if connectionMode == .relay {
-            return !name.isEmpty
-        }
         return !name.isEmpty && !host.isEmpty && !username.isEmpty && !port.isEmpty &&
         (authType == .password ? !password.isEmpty :
             selectedKeyID != nil && availableKeys.contains(where: { $0.id == selectedKeyID }))
@@ -493,47 +373,18 @@ struct AddServerView: View {
         let server = Server(
             id: serverID,
             name: name,
-            host: connectionMode == .relay ? "relay" : host,
+            host: host,
             port: portNum,
-            username: connectionMode == .relay ? "relay" : username,
+            username: username,
             authMethod: authMethod,
             groupID: selectedGroupID,
             countryCode: editingServer?.countryCode,
             iconData: iconData,
             permissionLevel: serverPermissionLevel,
-            expirationDate: hasExpiration ? expirationDate : nil,
-            connectionMode: connectionMode
+            expirationDate: hasExpiration ? expirationDate : nil
         )
         onSave(server, pwd, selectedGroupID)
 
-        // 持久化 DLC override
-        switch dlcOverride {
-        case .followGlobal:
-            DLCSettings.clearServerOverride(for: server.id)
-        case .enabled:
-            DLCSettings.setServerOverride(for: server.id, enabled: true)
-        case .disabled:
-            DLCSettings.setServerOverride(for: server.id, enabled: false)
-        }
-
         dismiss()
-    }
-
-    /// 生成 relay daemon token。
-    private func generateRelayToken() async {
-        guard let service = relayTokenService else { return }
-        isGeneratingToken = true
-        defer { isGeneratingToken = false }
-
-        do {
-            let serverID = editingServer?.id ?? UUID()
-            let response = try await service.createToken(
-                serverID: serverID,
-                name: name.isEmpty ? nil : name
-            )
-            relayInstallCommand = response.installCommand
-        } catch {
-            // token 生成失败，静默处理
-        }
     }
 }

@@ -184,7 +184,7 @@ func makeCoordinatorSessionFactory(
 ) -> DirectSessionCoordinator.SessionFactory {
     let remaining = LockedBox(outcomes)
 
-    return { agent, _, _ in
+    return { agent, _ in
         let next = remaining.withValue { queue in
             queue.isEmpty ? .success(displayName: agent.type.displayName) : queue.removeFirst()
         }

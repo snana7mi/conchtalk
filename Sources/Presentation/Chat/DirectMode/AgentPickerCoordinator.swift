@@ -58,8 +58,6 @@ final class AgentPickerCoordinator {
     private let sshManager: SSHSessionManager
     private let server: Server
     private let taskCoordinator: TaskExecutionCoordinator
-    /// Relay 连接（DLC / relay 模式用于获取 daemon capabilities）。
-    var relayConnection: RelayConnection?
     private var serverID: UUID { server.id }
     /// 系统消息回调，参数为 (text, type)。
     @ObservationIgnored private var onSystemMessage: (_ text: String, _ type: Message.SystemMessageType) -> Void
@@ -99,18 +97,14 @@ final class AgentPickerCoordinator {
         Task {
             defer { isPickerRequestInFlight = false }
 
-            // 获取可用代理列表：DLC/relay 模式通过 daemon capabilities，否则通过 SSH
+            // 获取可用代理列表：通过 SSH 探测服务器能力
             let agents: [AgentInfo]
-            if DLCSettings.isEffectivelyEnabled(for: server.id), let relay = relayConnection {
-                agents = await fetchAgentsViaRelay(relay)
-            } else {
-                guard let client = sshManager.getClient(for: server.id) else {
-                    taskCoordinator.resolveAgentConnection(for: serverID, with: .cancelled)
-                    return
-                }
-                let caps = await client.serverCapabilities
-                agents = caps.availableAgents
+            guard let client = sshManager.getClient(for: server.id) else {
+                taskCoordinator.resolveAgentConnection(for: serverID, with: .cancelled)
+                return
             }
+            let caps = await client.serverCapabilities
+            agents = caps.availableAgents
             guard !agents.isEmpty else {
                 onSystemMessage(
                     String(localized: "No coding agents available on this server", bundle: LanguageSettings.currentBundle),
@@ -320,32 +314,4 @@ final class AgentPickerCoordinator {
         }
     }
 
-    // MARK: - Relay Agent 探测
-
-    /// 通过 relay WebSocket 的 get_capabilities 获取 daemon 上报的代理列表。
-    private func fetchAgentsViaRelay(_ relay: RelayConnection) async -> [AgentInfo] {
-        do {
-            try await relay.sendGetCapabilities()
-        } catch {
-            return []
-        }
-        // 等待 capabilities 事件（超时 5 秒）
-        return await withTaskGroup(of: [AgentInfo].self) { group in
-            group.addTask {
-                for await event in relay.events {
-                    if case .capabilities(let agents) = event {
-                        return agents
-                    }
-                }
-                return []
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(5))
-                return []
-            }
-            let result = await group.next() ?? []
-            group.cancelAll()
-            return result
-        }
-    }
 }

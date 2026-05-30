@@ -7,7 +7,7 @@ import Testing
 /// 验证 NIOSSHClient 的命令执行能力，包括标准输出、标准错误、退出码、
 /// 流式输出、超时和 ANSI 转义序列等场景。
 /// 需要设置环境变量（CT_TEST_HOST 等）才能运行，否则自动跳过。
-@Suite(.tags(.integration), .serialized)
+@Suite(.tags(.integration), .serialized, .enabled(if: IntegrationTestConfig.isAvailable))
 struct SSHExecutionIntegrationTests {
 
     // MARK: - executeSimpleCommand

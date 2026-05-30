@@ -7,7 +7,7 @@ import Foundation
 @MainActor
 struct ChatDerivedState {
 
-    /// 过滤掉 aiContext、relayStatus 系统消息后的展示列表。
+    /// 过滤掉 aiContext 系统消息后的展示列表。
     let displayMessages: [Message]
 
     /// break 之前的消息 ID 集合（用于 UI 透明度判断），O(1) 查找。
@@ -19,10 +19,7 @@ struct ChatDerivedState {
     /// 从消息列表计算派生状态。
     init(messages: [Message]) {
         self.displayMessages = messages.filter {
-            $0.systemMessageType != .aiContext &&
-            $0.systemMessageType != .relayStatus &&
-            // 兼容旧版数据库中以 .connected 类型存储的 "Relay connected" 历史消息
-            !($0.role == .system && $0.systemMessageType == .connected && $0.content.hasPrefix("Relay connected"))
+            $0.systemMessageType != .aiContext
         }
 
         let breakIndex = messages.lastIndex { $0.systemMessageType == .contextBreak }
