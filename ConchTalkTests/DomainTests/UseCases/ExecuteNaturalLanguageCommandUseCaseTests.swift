@@ -60,6 +60,28 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
         func sendSimpleMessage(_ prompt: String) async throws -> String { "" }
     }
 
+    private actor Counter {
+        private(set) var value = 0
+        func increment() { value += 1 }
+    }
+
+    private actor CountingSubagentRunner: SubagentRunning {
+        private(set) var callCount = 0
+
+        func run(tasks: [SubagentTask]) async -> [SubagentResult] {
+            callCount += 1
+            return tasks.map {
+                SubagentResult(
+                    subagentName: $0.subagentType,
+                    task: $0.prompt,
+                    outcome: "ok",
+                    succeeded: true,
+                    errorSummary: nil
+                )
+            }
+        }
+    }
+
     // MARK: - 辅助方法
 
     /// 构造被测用例及其依赖的 Mock 对象。
@@ -396,6 +418,41 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
         #expect(mockTool.executeCalled == 1)
     }
 
+    @Test("Strict mode confirms dispatch_subagent before running subagents")
+    func strictModeConfirmsDispatchSubagent() async throws {
+        let (useCase, aiService, _, _) = makeUseCase(permissionLevel: .strict)
+        let runner = CountingSubagentRunner()
+        useCase.subagentRunner = runner
+
+        let dispatchCall = TestFixtures.makeToolCall(
+            id: "dispatch_1",
+            toolName: DispatchSubagentTool.toolName,
+            arguments: ["tasks": [["subagent_type": "explorer", "prompt": "find auth"]]]
+        )
+        aiService.streamingResponses = [
+            [.toolCall(dispatchCall), .done],
+            [.content("Dispatch denied."), .done],
+        ]
+
+        let confirmationCount = Counter()
+        useCase.onToolCallNeedsConfirmation = { _ in
+            await confirmationCount.increment()
+            return .denied
+        }
+
+        let messages = try await useCase.execute(
+            userMessage: "dispatch",
+            conversationHistory: [],
+            serverContext: ""
+        )
+
+        #expect(await confirmationCount.value == 1)
+        #expect(await runner.callCount == 0)
+        #expect(messages.contains { $0.systemMessageType == .commandDenied })
+        #expect(messages.last?.role == .assistant)
+        #expect(messages.last?.content == "Dispatch denied.")
+    }
+
     // MARK: - 9. 宽松模式降级需确认工具为安全
 
     @Test("Permissive mode downgrades needsConfirmation to safe, auto-executes")
@@ -542,5 +599,55 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
                 serverContext: ""
             )
         }
+    }
+
+    // MARK: - 11. 可注入 maxIterations
+
+    @Test("注入的 maxIterations 生效：循环按注入上限停止并触发收敛总结")
+    func customMaxIterations() async throws {
+        let aiService = MockAIService()
+        let toolRegistry = MockToolRegistry()
+        let sshClient = MockSSHClient()
+        let useCase = ExecuteNaturalLanguageCommandUseCase(
+            aiService: aiService,
+            sshClient: sshClient,
+            toolRegistry: toolRegistry,
+            serverID: nil,
+            permissionLevel: .standard,
+            maxIterations: 1
+        )
+        let tool = MockTool(
+            name: "read_file",
+            safetyLevel: .safe,
+            executeResult: ToolExecutionResult(output: "x")
+        )
+        toolRegistry.register(tool)
+
+        let call = TestFixtures.makeToolCall(id: "c", toolName: "read_file", arguments: ["path": "/a"])
+        // AI 始终想调用工具，用于检验循环是否真的按注入上限停止：
+        // [0] 初始 sendMessageStreaming → toolCall（消耗唯一一轮循环体）
+        // [1] 工具回填后 sendToolResultStreaming → 仍 toolCall（此时已达上限，进入收敛分支）
+        // [2] 收敛总结请求 → 返回最终文本
+        // 若注入未生效（沿用默认 50），[1] 的 toolCall 会驱动工具被第二次执行。
+        aiService.streamingResponses = [
+            [.toolCall(call), .done],
+            [.toolCall(call), .done],
+            [.content("final summary"), .done]
+        ]
+
+        let messages = try await useCase.execute(
+            userMessage: "go",
+            conversationHistory: [],
+            serverContext: ""
+        )
+
+        // 关键断言：循环只跑了 1 轮 → 工具仅执行 1 次（默认 50 时会执行 2 次），证明注入的上限被使用。
+        #expect(tool.executeCalled == 1)
+        // 达到上限后触发收敛总结：最终消息为 assistant，内容来自收敛响应 [2]。
+        #expect(messages.last?.role == .assistant)
+        #expect(messages.last?.content == "final summary")
+        // 调用次数：初始 1 次 sendMessageStreaming；工具回填 + 收敛提示共 2 次 sendToolResultStreaming。
+        #expect(aiService.callCount("sendMessageStreaming") == 1)
+        #expect(aiService.callCount("sendToolResultStreaming") == 2)
     }
 }

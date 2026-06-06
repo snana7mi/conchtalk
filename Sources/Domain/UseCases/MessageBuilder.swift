@@ -95,6 +95,16 @@ nonisolated enum MessageBuilder {
                         "tool_call_id": toolCall.id,
                         "content": decayedContent,
                     ])
+                } else {
+                    // UI-only command cards（如 subagent 结论卡）没有 tool_call_id，
+                    // 不能按 OpenAI tool result 发送，但应作为普通上下文保留给后续轮次。
+                    let summary = msg.toolOutput ?? msg.content
+                    if !summary.isEmpty {
+                        result.append([
+                            "role": "user",
+                            "content": "[Command result: \(msg.content)]\n\(summary)",
+                        ])
+                    }
                 }
             case .system:
                 // 系统消息发送给 AI 时使用英文，避免本地化文本影响 AI 的语言选择

@@ -4,7 +4,7 @@ import Foundation
 
 /// Server：
 /// 表示一台可连接服务器的核心信息，包括地址、认证方式、分组及最近连接时间。
-struct Server: Identifiable, Codable, Hashable, Sendable {
+nonisolated struct Server: Identifiable, Codable, Hashable, Sendable {
     var id: UUID
     var name: String
     var host: String

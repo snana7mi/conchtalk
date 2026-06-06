@@ -32,6 +32,17 @@ nonisolated final class AIProxyService: AIServiceProtocol, @unchecked Sendable {
         self.auxiliaryService = AIAuxiliaryService(session: urlSession)
     }
 
+    /// 创建一个共享相同凭据/认证设置、但使用不同工具定义的 AI 服务视图。
+    /// 子 agent 使用受限工具表时需要同时限制「模型可见 schema」与「执行侧 registry」。
+    func withToolRegistry(_ toolRegistry: ToolRegistryProtocol) -> AIProxyService {
+        AIProxyService(
+            keychainService: keychainService,
+            toolRegistry: toolRegistry,
+            skillRegistry: skillRegistry,
+            authService: authService
+        )
+    }
+
     /// 根据 useLocalConfig 路由到本地直连或云端代理。
     private func resolveRequestConfig() async throws -> AIRequestConfig {
         let settings = AISettings.load(keychainService: keychainService)

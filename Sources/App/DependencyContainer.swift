@@ -14,6 +14,7 @@ final class DependencyContainer {
     let aiService: AIProxyService
     let toolRegistry: ToolRegistry
     let skillRegistry: SkillRegistry
+    let subagentRegistry: SubagentRegistry
     let notificationService: NotificationService
     let memoryService: MemoryService
     // MARK: - 新架构组件（Context + Memory 服务链）
@@ -83,12 +84,14 @@ final class DependencyContainer {
 
         // Skill 加载留在主线程（6 个 .md 文件，开销很小，避免跨 actor 传递问题）
         let skills = SkillRegistry.loadSkillsFromBundle()
+        // Subagent 角色加载（与 Skill 同款轻量加载；Subagents/ 打包到 Task 10 才加，当前返回 []）
+        let subagents = SubagentRegistry.loadSubagentsFromBundle()
 
-        return DependencyContainer(modelContainer: modelContainer, preloadedSkills: skills)
+        return DependencyContainer(modelContainer: modelContainer, preloadedSkills: skills, preloadedSubagents: subagents)
     }
 
     /// 使用预加载的组件初始化（由 create() 调用，主线程上只做轻量 wiring）。
-    private init(modelContainer: ModelContainer, preloadedSkills: [Skill]) {
+    private init(modelContainer: ModelContainer, preloadedSkills: [Skill], preloadedSubagents: [SubagentDefinition]) {
         self.modelContainer = modelContainer
         self.store = SwiftDataStore(modelContainer: modelContainer)
 
@@ -99,6 +102,9 @@ final class DependencyContainer {
         // Skill Registry（使用预加载数据，不再读磁盘）
         self.skillRegistry = SkillRegistry(preloaded: preloadedSkills)
 
+        // Subagent Registry（使用预加载数据；需在 Tool Registry 之前就绪，供注入 summaries）
+        self.subagentRegistry = SubagentRegistry(preloaded: preloadedSubagents)
+
         // Auth 服务需要在 Tool Registry 之前创建，以决定是否注入 WebSearchTool
         let keychainSvc = KeychainService()
         self.keychainService = keychainSvc
@@ -108,7 +114,8 @@ final class DependencyContainer {
         // Tool Registry（需要 authService 决定是否注入 WebSearchTool）
         self.toolRegistry = ToolRegistryFactory.makeBaseRegistry(
             skillRegistry: skillRegistry,
-            authService: authSvc
+            authService: authSvc,
+            subagentSummaries: subagentRegistry.subagentSummaries
         )
         sshMgr.store = store
         self.aiService = AIProxyService(keychainService: keychainService, toolRegistry: toolRegistry, skillRegistry: skillRegistry, authService: authService)
@@ -176,7 +183,8 @@ final class DependencyContainer {
             contextBuilder: ctxBuilder,
             contextCompactor: ctxCompactor,
             keepAlive: BackgroundKeepAlive(),
-            notificationService: notifSvc
+            notificationService: notifSvc,
+            subagentRegistry: subagentRegistry
         )
         self.taskExecutionCoordinator = tec
     }

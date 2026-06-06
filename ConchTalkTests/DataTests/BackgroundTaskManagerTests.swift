@@ -42,7 +42,6 @@ struct TaskExecutionCoordinatorCancelTests {
         sshManager.store = store
 
         let toolRegistry = MockToolRegistry()
-        let keychainService = MockKeychainService()
         let notificationService = NotificationService()
         let memoryService = MockMemoryService()
         let authService = MockAuthService()
@@ -64,7 +63,8 @@ struct TaskExecutionCoordinatorCancelTests {
             contextFactory: contextFactory,
             aiService: aiService,
             keepAlive: BackgroundKeepAlive(),
-            notificationService: notificationService
+            notificationService: notificationService,
+            subagentRegistry: SubagentRegistry(preloaded: [])
         )
         return (coordinator, sshManager)
     }

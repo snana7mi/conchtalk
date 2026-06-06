@@ -16,7 +16,7 @@ extension Tag {
 /// IntegrationTestConfig：
 /// 优先从 `integration_test_config.json` 加载配置，fallback 到环境变量。
 /// 提供工厂方法创建 Server、NIOSSHClient、AIProxyService 等实例。
-struct IntegrationTestConfig: Sendable, Codable {
+nonisolated struct IntegrationTestConfig: Sendable, Codable {
 
     // MARK: - SSH 配置
 
@@ -39,7 +39,7 @@ struct IntegrationTestConfig: Sendable, Codable {
     /// 2. 源码目录 `ConchTalkTests/Helpers/integration_test_config.json`
     /// 3. 项目根目录 `integration_test_config.json`
     /// 全部找不到或解析失败时，尝试环境变量。都没有则返回 nil（测试自动跳过）。
-    static func load() -> IntegrationTestConfig? {
+    nonisolated static func load() -> IntegrationTestConfig? {
         // 尝试从 JSON 文件加载
         if let config = loadFromFile() {
             return config
@@ -50,12 +50,12 @@ struct IntegrationTestConfig: Sendable, Codable {
 
     /// Swift Testing 没有 XCTest 风格的运行时 XCTSkip；集成测试通过 suite trait
     /// 在 discovery 阶段禁用，避免缺少外部服务器/API 配置时记录失败。
-    static var isAvailable: Bool {
+    nonisolated static var isAvailable: Bool {
         load() != nil
     }
 
     /// 从 JSON 配置文件加载。利用 `#filePath` 在编译时获取源码路径，推算配置文件位置。
-    private static func loadFromFile() -> IntegrationTestConfig? {
+    nonisolated private static func loadFromFile() -> IntegrationTestConfig? {
         // #filePath → .../ConchTalkTests/Helpers/IntegrationTestConfig.swift
         // 同目录下放 integration_test_config.json
         let thisFile = URL(fileURLWithPath: #filePath)
@@ -83,7 +83,7 @@ struct IntegrationTestConfig: Sendable, Codable {
     }
 
     /// 从环境变量加载。
-    private static func loadFromEnvironment() -> IntegrationTestConfig? {
+    nonisolated private static func loadFromEnvironment() -> IntegrationTestConfig? {
         let env = ProcessInfo.processInfo.environment
 
         guard let host = env["CT_TEST_HOST"],

@@ -23,11 +23,11 @@ struct ACPStreamParserTests {
         let mid = line.index(line.startIndex, offsetBy: line.count / 2)
         let part1 = String(line[..<mid])
 
-        // 累积模式：第一次传入前半段（不完整行）
+        // 增量 chunk 模式：第一次传入前半段（不完整行）
         let r1 = parser.parse(chunk: part1)
         #expect(r1.isEmpty)
-        // 第二次传入完整累积文本（part1 + part2）
-        let r2 = parser.parse(chunk: line)
+        // 第二次只传入新到达的后半段
+        let r2 = parser.parse(chunk: String(line[mid...]))
         #expect(r2.count == 1)
         #expect(r2[0] == event)
     }
@@ -62,8 +62,8 @@ struct ACPStreamParserTests {
         // 第一次：完整 line1
         let r1 = parser.parse(chunk: line1)
         #expect(r1.count == 1)
-        // 第二次：传入 line1+line2（累积），只应解析 line2
-        let r2 = parser.parse(chunk: line1 + line2)
+        // 第二次：只传入新到达的 line2
+        let r2 = parser.parse(chunk: line2)
         #expect(r2.count == 1)
         #expect(r2[0] == e2)
     }

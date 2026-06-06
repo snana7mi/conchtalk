@@ -6,6 +6,10 @@ import Foundation
 /// 实现 AIServiceProtocol 的测试替身，按顺序消费预配置的流式响应序列。
 final class MockAIService: AIServiceProtocol, @unchecked Sendable {
 
+    /// 保护并发可变状态（callHistory / streamingResponseIndex）。
+    /// SubagentRunner 会从并行任务并发调用流式方法，需串行化读改写避免数据竞争。
+    private let lock = NSLock()
+
     // MARK: - 调用记录
 
     struct CallRecord: Sendable {
@@ -40,7 +44,7 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
         serverName: String,
         serverCapabilities: ServerCapabilities
     ) -> AsyncStream<StreamingDelta> {
-        callHistory.append(CallRecord(method: "sendMessageStreaming", message: message))
+        recordCall(CallRecord(method: "sendMessageStreaming", message: message))
         return makeStream()
     }
 
@@ -54,7 +58,7 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
         serverName: String,
         serverCapabilities: ServerCapabilities
     ) -> AsyncStream<StreamingDelta> {
-        callHistory.append(CallRecord(method: "sendToolResultStreaming", message: result))
+        recordCall(CallRecord(method: "sendToolResultStreaming", message: result))
         return makeStream()
     }
 
@@ -64,13 +68,13 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
         existingServerMemory: String?,
         existingGlobalMemory: String?
     ) async throws -> MemorySummaryResult {
-        callHistory.append(CallRecord(method: "generateMemorySummary", message: nil))
+        recordCall(CallRecord(method: "generateMemorySummary", message: nil))
         if let error = memorySummaryError { throw error }
         return memorySummaryResult
     }
 
     func sendSimpleMessage(_ prompt: String) async throws -> String {
-        callHistory.append(CallRecord(method: "sendSimpleMessage", message: prompt))
+        recordCall(CallRecord(method: "sendSimpleMessage", message: prompt))
         if let error = simpleMessageError { throw error }
         return simpleMessageResult
     }
@@ -81,7 +85,16 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
 
     // MARK: - 内部辅助
 
+    /// 线程安全地追加调用记录。
+    private func recordCall(_ record: CallRecord) {
+        lock.lock()
+        callHistory.append(record)
+        lock.unlock()
+    }
+
     private func makeStream() -> AsyncStream<StreamingDelta> {
+        // 锁内完成 index 读改写，避免并行子 agent 同时进入造成的越界与丢更新。
+        lock.lock()
         let deltas: [StreamingDelta]
         if streamingResponseIndex < streamingResponses.count {
             deltas = streamingResponses[streamingResponseIndex]
@@ -90,6 +103,7 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
             deltas = [.done]
         }
         let shouldThrowCancellation = throwCancellationAfterYielding
+        lock.unlock()
         return AsyncStream { continuation in
             for delta in deltas {
                 continuation.yield(delta)
@@ -104,6 +118,8 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
     // MARK: - 辅助方法
 
     func reset() {
+        lock.lock()
+        defer { lock.unlock() }
         callHistory = []
         streamingResponses = []
         streamingResponseIndex = 0
@@ -115,10 +131,14 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
     }
 
     func didCall(_ method: String) -> Bool {
-        callHistory.contains { $0.method == method }
+        lock.lock()
+        defer { lock.unlock() }
+        return callHistory.contains { $0.method == method }
     }
 
     func callCount(_ method: String) -> Int {
-        callHistory.filter { $0.method == method }.count
+        lock.lock()
+        defer { lock.unlock() }
+        return callHistory.filter { $0.method == method }.count
     }
 }

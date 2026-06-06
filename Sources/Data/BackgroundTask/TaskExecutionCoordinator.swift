@@ -57,6 +57,9 @@ final class TaskExecutionCoordinator {
     /// 通知服务。
     private let notificationService: NotificationService
 
+    /// subagent 角色注册表（供子 agent 编排器按名查找角色定义）。
+    private let subagentRegistry: SubagentRegistry
+
     /// App 是否在前台。
     var isAppInForeground: Bool = true
 
@@ -77,7 +80,8 @@ final class TaskExecutionCoordinator {
         contextBuilder: ContextBuilder? = nil,
         contextCompactor: ContextCompactor? = nil,
         keepAlive: BackgroundKeepAlive,
-        notificationService: NotificationService
+        notificationService: NotificationService,
+        subagentRegistry: SubagentRegistry
     ) {
         let (stream, continuation) = AsyncStream.makeStream(of: TaskExecutionEvent.self)
         self.eventStream = stream
@@ -92,6 +96,7 @@ final class TaskExecutionCoordinator {
         self.contextCompactor = contextCompactor
         self.keepAlive = keepAlive
         self.notificationService = notificationService
+        self.subagentRegistry = subagentRegistry
     }
 
     deinit {
@@ -349,6 +354,25 @@ final class TaskExecutionCoordinator {
             serverID: serverID,
             server: server,
             userInput: text
+        )
+
+        // 注入 subagent 编排器：复用主审批通道（parentConfirm = handleToolCallConfirmation），
+        // 并行确认经 SubagentApprovalGate 串行化，避免 per-server 单槽 continuation 互相覆盖。
+        let subagentApprovalGate = SubagentApprovalGate()
+        useCase.subagentRunner = SubagentRunner(
+            aiService: aiService,
+            sshClient: sshClient,
+            baseToolRegistry: effectiveToolRegistry,
+            registry: subagentRegistry,
+            serverID: serverID,
+            permissionLevel: effectivePermissionLevel,
+            serverContext: serverContext,
+            approvalGate: subagentApprovalGate,
+            parentConfirm: { [weak self] call in
+                guard let self else { return .denied }
+                return await self.handleToolCallConfirmation(serverID: serverID, toolCall: call)
+            },
+            maxConcurrent: 2
         )
 
         // 绑定回调

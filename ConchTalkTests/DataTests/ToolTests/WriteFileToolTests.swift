@@ -88,8 +88,8 @@ struct WriteFileToolTests {
         #expect(result.output.contains("Appended to") || result.output.contains("bytes"))
     }
 
-    @Test("写入命令使用 heredoc 格式（包含 cat <<）")
-    func writeUsesHeredoc() async throws {
+    @Test("文本写入使用 SFTP 而非 heredoc")
+    func textWriteUsesSFTP() async throws {
         let mockClient = MockSSHClient()
         mockClient.executeResults = ["", "", "5"]
 
@@ -102,8 +102,8 @@ struct WriteFileToolTests {
             sshClient: mockClient
         )
 
-        let writeCmd = mockClient.executedCommands.first { $0.contains("cat <<") }
-        #expect(writeCmd != nil)
+        #expect(mockClient.didCall("sftpWriteFile"))
+        #expect(!mockClient.executedCommands.contains { $0.contains("cat <<") })
     }
 
     // MARK: - 参数缺失

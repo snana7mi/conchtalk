@@ -2,7 +2,7 @@
 import Foundation
 
 /// SafetyLevel：定义工具调用在执行前的安全决策级别。
-nonisolated enum SafetyLevel: Sendable {
+nonisolated enum SafetyLevel: Equatable, Sendable {
     case safe               // 可直接执行，不需要用户确认
     case needsConfirmation  // 需要弹窗确认后再执行
     case forbidden          // 明确禁止执行

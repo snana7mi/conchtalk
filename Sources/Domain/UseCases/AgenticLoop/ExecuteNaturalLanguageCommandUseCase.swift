@@ -25,6 +25,8 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     let permissionLevel: PermissionLevel
     /// 注入的本地化文案。
     private let localizedTexts: LocalizedTexts
+    /// agentic loop 最大迭代轮数（默认 50；子 agent 注入更小值以更快收敛）。
+    private let maxIterations: Int
 
     /// 上下文组装器（可选）：组装 system prompt + 记忆 + 历史消息，估算 token 并标记是否需要压缩。
     var contextBuilder: ContextBuilder?
@@ -40,6 +42,9 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     /// - Parameter preferredAgent: AI 建议的代理类型（可为 nil）。
     /// - Returns: 用户的选择结果。
     var onAgentConnectionSuggested: (@Sendable (_ preferredAgent: String?, _ cwd: String?, _ directories: [String]?, _ homePath: String?) async -> AgentConnectionResult)?
+    /// subagent 编排器（注入后启用 `dispatch_subagent` 拦截分支）。
+    /// - Note: 未注入时该工具会被回填一句 ERROR，让模型自行收敛而非崩溃。
+    var subagentRunner: SubagentRunning?
     /// 产生中间消息（如工具执行结果）时回调给 UI。
     /// - Side Effects: 调用方通常会据此立即更新消息列表。
     var onIntermediateMessage: (@MainActor @Sendable (Message) -> Void)?
@@ -79,7 +84,8 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
         toolRegistry: ToolRegistryProtocol,
         serverID: UUID? = nil,
         permissionLevel: PermissionLevel = .standard,
-        localizedTexts: LocalizedTexts = .english
+        localizedTexts: LocalizedTexts = .english,
+        maxIterations: Int = 50
     ) {
         self.aiService = aiService
         self.sshClient = sshClient
@@ -87,6 +93,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
         self.serverID = serverID
         self.permissionLevel = permissionLevel
         self.localizedTexts = localizedTexts
+        self.maxIterations = maxIterations
     }
 
     /// 执行自然语言指令主流程。
@@ -96,7 +103,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     ///   - serverContext: 服务器上下文（主机、账号、系统等）。
     /// - Returns: 本轮新增消息（assistant/command/system），用于追加到会话。
     /// - Throws: 当 AI 流式请求失败、流中返回错误事件或上游服务异常时抛出。
-    /// - Important: 内部最多执行 10 轮 agentic loop，避免无限工具循环。
+    /// - Important: 内部最多执行 `maxIterations` 轮 agentic loop（默认 50，子 agent 可注入更小值），避免无限工具循环。
     /// - Side Effects:
     ///   - 可能触发用户审批回调、流式文本回调和中间消息回调。
     ///   - 可能通过工具执行远端命令并产生外部系统副作用。
@@ -153,7 +160,6 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
         }
 
         // Agentic loop
-        let maxIterations = 50
         var iteration = 0
         while iteration < maxIterations {
             try Task.checkCancellation()
@@ -193,6 +199,74 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     case .exitLoop:
                         return newMessages
                     }
+                }
+
+                // MARK: dispatch_subagent 拦截
+                // 与 suggest_agent_connection 同属特殊工具拦截：派生子 agent 执行，落结论卡 + 回填汇总文本。
+                if toolCall.toolName == DispatchSubagentTool.toolName {
+                    // strict 模式下 safe 工具也需确认；特殊工具拦截发生在通用 ToolSafetyGate 前，
+                    // 因此这里显式应用同一权限映射，避免绕过全局确认策略。
+                    if permissionLevel.effectiveSafetyLevel(.safe) == .needsConfirmation {
+                        let approval = await onToolCallNeedsConfirmation?(toolCall) ?? .denied
+                        guard approval == .approved else {
+                            let deniedOutput = "DENIED: User rejected this subagent dispatch. Acknowledge the denial briefly and ask how to proceed."
+                            let deniedMsg = Message(
+                                role: .system,
+                                content: localizedTexts.userRejectedCommand,
+                                toolCall: toolCall,
+                                reasoningContent: roundReasoning,
+                                systemMessageType: .commandDenied
+                            )
+                            newMessages.append(deniedMsg)
+                            history.append(deniedMsg)
+                            await onIntermediateMessage?(deniedMsg)
+
+                            let toolResult = Message(
+                                role: .command,
+                                content: toolCall.explanation,
+                                toolCall: toolCall,
+                                toolOutput: deniedOutput,
+                                reasoningContent: roundReasoning
+                            )
+                            history.append(toolResult)
+                            pendingToolCalls.removeAll()
+                            response = try await nextResponseAfterToolResult(
+                                output: deniedOutput, toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                            )
+                            continue
+                        }
+                    }
+
+                    let dispatchOutput: String
+                    if let subagentRunner {
+                        let dispatch = await SubagentDispatchHandler.handle(
+                            toolCall: toolCall, reasoning: roundReasoning, runner: subagentRunner
+                        )
+                        // 每个子 agent 结论作为 UI 卡片落入会话；不加入当前模型 history，
+                        // 防止同一个 dispatch_subagent tool_call_id 被多次作为 tool result 发送。
+                        for msg in dispatch.messages {
+                            newMessages.append(msg)
+                            await onIntermediateMessage?(msg)
+                        }
+                        dispatchOutput = dispatch.output
+                    } else {
+                        // runner 未注入（如无可用角色 / 装配未启用）：回填 ERROR 让模型自行收敛，不挂起。
+                        dispatchOutput = "ERROR: subagent runner is not available in this context."
+                    }
+
+                    let toolResult = Message(
+                        role: .command,
+                        content: toolCall.explanation,
+                        toolCall: toolCall,
+                        toolOutput: dispatchOutput,
+                        reasoningContent: roundReasoning
+                    )
+                    history.append(toolResult)
+                    // 汇总文本作为唯一模型可见 tool result 回填给主模型，进入下一轮。
+                    response = try await nextResponseAfterToolResult(
+                        output: dispatchOutput, toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                    )
+                    continue
                 }
 
                 // 错误分支：工具未注册，回填错误给模型并继续下一轮。

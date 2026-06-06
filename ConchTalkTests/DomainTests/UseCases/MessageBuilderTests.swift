@@ -92,10 +92,12 @@ struct MessageBuilderTests {
         #expect(result.isEmpty)
     }
 
-    @Test("command 无 toolCall 时跳过")
+    @Test("command 无 toolCall 时作为普通上下文保留")
     func commandWithoutToolCall() {
-        let messages = [TestFixtures.makeMessage(role: .command, content: "no tool")]
+        let messages = [TestFixtures.makeMessage(role: .command, content: "subagent: explorer", toolOutput: "found auth.swift")]
         let result = MessageBuilder.build(from: messages)
-        #expect(result.isEmpty)
+        #expect(result.count == 1)
+        #expect(result[0]["role"] as? String == "user")
+        #expect((result[0]["content"] as? String)?.contains("found auth.swift") == true)
     }
 }

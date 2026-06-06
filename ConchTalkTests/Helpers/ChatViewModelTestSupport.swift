@@ -64,7 +64,8 @@ enum ChatViewModelTestSupport {
             contextFactory: contextFactory,
             aiService: aiService,
             keepAlive: BackgroundKeepAlive(),
-            notificationService: notificationService
+            notificationService: notificationService,
+            subagentRegistry: SubagentRegistry(preloaded: [])
         )
         let entryStore = MockMemoryEntryStore()
         let retainService = RetainService(

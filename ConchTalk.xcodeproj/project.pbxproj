@@ -15,7 +15,9 @@
 		24FE2D0F2F7A50640001CA77 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24FE2CF02F7A4F8C0001CA77 /* WidgetKit.framework */; };
 		24FE2D102F7A50640001CA77 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24FE2CF22F7A4F8C0001CA77 /* SwiftUI.framework */; };
 		24FE2D212F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		9B6D28BE2FCFD09000B4BF0D /* LLMGatewayKit in Frameworks */ = {isa = PBXBuildFile; productRef = 24D38EDF2F90000000C97364 /* LLMGatewayKit */; };
 		BB00000200000000000000B2 /* Skills in Resources */ = {isa = PBXBuildFile; fileRef = BB00000100000000000000B1 /* Skills */; };
+		BB00000400000000000000B4 /* Subagents in Resources */ = {isa = PBXBuildFile; fileRef = BB00000300000000000000B3 /* Subagents */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +59,7 @@
 		24FE2D0E2F7A50640001CA77 /* ConchTalkLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ConchTalkLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000002000000000000AA02 /* ConchTalkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ConchTalkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB00000100000000000000B1 /* Skills */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Skills; sourceTree = "<group>"; };
+		BB00000300000000000000B3 /* Subagents */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Subagents; sourceTree = "<group>"; };
 		CC00000100000000000000C1 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -107,6 +110,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9B6D28BE2FCFD09000B4BF0D /* LLMGatewayKit in Frameworks */,
 				24FE2D102F7A50640001CA77 /* SwiftUI.framework in Frameworks */,
 				24FE2D0F2F7A50640001CA77 /* WidgetKit.framework in Frameworks */,
 			);
@@ -129,6 +133,7 @@
 				243718FB2F4ED8F400E6DB92 /* ConchTalk.entitlements */,
 				240D8B872F42F3C800FBFD13 /* Sources */,
 				BB00000100000000000000B1 /* Skills */,
+				BB00000300000000000000B3 /* Subagents */,
 				AA000003000000000000AA03 /* ConchTalkTests */,
 				24FE2D112F7A50640001CA77 /* ConchTalkLiveActivity */,
 				24FE2CEF2F7A4F8C0001CA77 /* Frameworks */,
@@ -296,6 +301,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BB00000200000000000000B2 /* Skills in Resources */,
+				BB00000400000000000000B4 /* Subagents in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

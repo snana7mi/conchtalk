@@ -14,6 +14,7 @@ It is designed for natural-language-driven work such as server operations, file 
 
 - SSH-first workflow for remote machines you control
 - Multi-step AI agent loop with tool calling
+- Parallel subagents with isolated context and specialized roles
 - Built-in safety model for read, write, and dangerous operations
 - Background task execution with queueing and recovery
 - Direct agent mode for compatible remote coding agents
@@ -46,22 +47,20 @@ ConchTalk currently supports three ways to work:
 2. **Custom API**  
    You can configure your own endpoint, API key, and model. OpenAI-compatible and Anthropic-style APIs are supported.
 3. **Direct agent mode**  
-   If a compatible agent is available on the remote server, ConchTalk can connect to it directly over SSH.
+   If a compatible agent is already available on the remote server, ConchTalk can connect to it directly over SSH — no daemon or relay service is installed on your server.
 
-The current codebase includes support for or detection of the following agent types:
+The current codebase includes built-in support or detection for agents such as:
 
-- Claude Code
-- Codex
-- OpenCode
-- Gemini CLI
-- Kimi CLI
-- OpenClaw
-- Qwen Code
+- **Claude Code** and **Codex** — connected via their native protocols
+- **OpenCode**, **Gemini CLI**, **Kimi CLI**, **Qwen Code**, **OpenClaw** — and other agents that speak the **ACP (Agent Client Protocol)**
+
+ConchTalk detects which agents are already installed on the server, so the list above is representative rather than exhaustive.
 
 ## What ConchTalk Can Do
 
 - Connect to servers using password or SSH key authentication
 - Execute AI-planned multi-step tasks with tool calls
+- Dispatch parallel subagents for specialized, context-isolated subtasks
 - Read, write, edit, search, and upload files on remote systems
 - Fetch web content through the remote machine's network
 - Keep long-running work alive with Live Activity-powered background execution (iOS) and native background task fallback
@@ -84,6 +83,7 @@ Core tools include:
 - `web_fetch`
 - `suggest_agent_connection`
 - `activate_skill`
+- `dispatch_subagent`
 
 Conditionally injected tool:
 
@@ -93,6 +93,18 @@ Contextual memory tools:
 
 - `memory_read`
 - `memory_write`
+
+## Subagents
+
+The main agent can offload focused subtasks to subagents via the `dispatch_subagent` tool. Subagents keep intermediate exploration out of the main conversation and return only a refined result, which saves context and reduces noise.
+
+- **Specialized roles**: `explorer` (read-only remote filesystem and system investigation), `ops-diagnostician` (read-only remote diagnosis), and a `general-purpose` role for everything else
+- **Parallel execution**: independent subtasks run concurrently under a bounded concurrency cap
+- **Inherited permissions**: a subagent inherits the parent's tools (minus `dispatch_subagent`, to prevent nesting) and permission level
+- **Serialized confirmations**: when parallel subagents need approval, requests are funneled one at a time into the same approval UI, labeled by source
+- **Context isolation**: only the final per-subagent conclusion is written back to the main conversation as a result card
+
+Roles are defined as Markdown files with YAML frontmatter under `Subagents/`, mirroring the skill system.
 
 ## Safety Model
 
@@ -141,6 +153,7 @@ Key runtime paths:
 
 - **Chat session coordination**: `ChatSessionCoordinator` acts as the single source of truth for a chat session; direct agent mode is managed by `DirectSessionCoordinator`
 - **AI agent loop**: `ExecuteNaturalLanguageCommandUseCase` drives the cycle of model response → tool call → tool result → next model response
+- **Subagent orchestration**: `dispatch_subagent` is intercepted in the agent loop and run by `SubagentRunner`, which executes roles defined under `Subagents/` with bounded concurrency, restricted tool registries (no nested dispatch), and confirmation requests serialized through `SubagentApprovalGate`
 - **Tool execution path**: tool calls are checked by `ToolSafetyGate` and executed through `StreamingToolExecutor` when streaming is supported
 - **SSH execution**: remote commands run through isolated exec channels rather than a shared persistent shell state
 - **Background task management**: `TaskExecutionCoordinator` orchestrates task queuing, execution, approval continuations, and post-processing; `PerServerTaskQueue` manages per-server FIFO queues; `LiveActivityManager` starts a Live Activity to extend background runtime and surface task status on the Lock Screen and Dynamic Island; a native 30-second background task acts as fallback

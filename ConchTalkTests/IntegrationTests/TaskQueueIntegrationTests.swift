@@ -69,7 +69,8 @@ struct TaskQueueIntegrationTests {
             contextFactory: contextFactory,
             aiService: aiService,
             keepAlive: BackgroundKeepAlive(),
-            notificationService: notificationService
+            notificationService: notificationService,
+            subagentRegistry: SubagentRegistry(preloaded: [])
         )
         return (coordinator, sshManager, store)
     }

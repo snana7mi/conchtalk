@@ -11,7 +11,8 @@ nonisolated enum ToolRegistryFactory {
     /// authService 非 nil 时注入 WebSearchTool（云端代理模式）。
     static func makeBaseTools(
         skillRegistry: SkillRegistry,
-        authService: AuthServiceProtocol? = nil
+        authService: AuthServiceProtocol? = nil,
+        subagentSummaries: String = ""
     ) -> [ToolProtocol] {
         var tools: [ToolProtocol] = [
             ExecuteSSHCommandTool(),
@@ -24,6 +25,7 @@ nonisolated enum ToolRegistryFactory {
             WebFetchTool(),
             SuggestAgentConnectionTool(),
             ActivateSkillTool(skillRegistry: skillRegistry),
+            DispatchSubagentTool(subagentSummaries: subagentSummaries),
         ]
 
         // 云端代理模式：注入 WebSearchTool
@@ -37,11 +39,13 @@ nonisolated enum ToolRegistryFactory {
     /// 基于基础工具构建应用级注册表。
     static func makeBaseRegistry(
         skillRegistry: SkillRegistry,
-        authService: AuthServiceProtocol? = nil
+        authService: AuthServiceProtocol? = nil,
+        subagentSummaries: String = ""
     ) -> ToolRegistry {
         ToolRegistry(tools: makeBaseTools(
             skillRegistry: skillRegistry,
-            authService: authService
+            authService: authService,
+            subagentSummaries: subagentSummaries
         ))
     }
 
