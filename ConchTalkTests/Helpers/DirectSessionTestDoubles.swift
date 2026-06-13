@@ -92,6 +92,17 @@ actor FakeDirectAgentSession: DirectAgentSessionType {
 
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void) async {}
 
+    private var permissionHandler: (@Sendable (ACPPermissionRequest) async -> Bool)?
+
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) async {
+        permissionHandler = handler
+    }
+
+    /// 测试用：模拟代理发起权限请求，返回 handler 的决策（未注册时 false）。
+    func requestPermission(_ request: ACPPermissionRequest) async -> Bool {
+        await permissionHandler?(request) ?? false
+    }
+
     func connect(cwd: String?) async throws -> String {
         if let connectError { throw connectError }
 

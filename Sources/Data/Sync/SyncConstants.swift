@@ -49,7 +49,6 @@ actor SyncVersionCounter {
 /// UserDefaults 本身线程安全，此处的竞态风险可接受。
 enum SyncState {
     private nonisolated static let lastSyncedVersionKey = "SyncState.lastSyncedVersion"
-    private nonisolated static let lastPullTimestampKey = "SyncState.lastPullTimestamp"
     private nonisolated static let syncEnabledKey = "SyncState.enabled"
     private nonisolated static let disabledByUserKey = "SyncState.disabledByUserID"
     private nonisolated static let deviceIdKey = "SyncState.deviceId"
@@ -60,9 +59,12 @@ enum SyncState {
         set { UserDefaults.standard.set(newValue, forKey: lastSyncedVersionKey) }
     }
 
-    nonisolated(unsafe) static var lastPullTimestamp: String {
-        get { UserDefaults.standard.string(forKey: lastPullTimestampKey) ?? "1970-01-01T00:00:00Z" }
-        set { UserDefaults.standard.set(newValue, forKey: lastPullTimestampKey) }
+    private nonisolated static let lastPulledSeqKey = "SyncState.lastPulledSeq"
+
+    /// pull 游标：已拉取到的最大服务端 seq。0 表示从未拉取过（或已重置）。
+    nonisolated(unsafe) static var lastPulledSeq: Int64 {
+        get { UserDefaults.standard.value(forKey: lastPulledSeqKey) as? Int64 ?? 0 }
+        set { UserDefaults.standard.set(newValue, forKey: lastPulledSeqKey) }
     }
 
     nonisolated(unsafe) static var isEnabled: Bool {
@@ -95,7 +97,7 @@ enum SyncState {
 
     nonisolated static func reset() {
         lastSyncedVersion = 0
-        lastPullTimestamp = "1970-01-01T00:00:00Z"
+        lastPulledSeq = 0
     }
 }
 

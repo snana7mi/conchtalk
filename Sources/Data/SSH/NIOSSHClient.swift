@@ -5,6 +5,7 @@ import Crypto
 import NIOCore
 import NIOFoundationCompat
 import NIOSSH
+import os
 
 /// NIOSSHClient：
 /// `SSHClientProtocol` 的具体实现，负责维护单连接状态、
@@ -195,15 +196,28 @@ actor NIOSSHClient: SSHClientProtocol {
             throw SSHError.notConnected
         }
 
+        // 同步完成标志：执行子任务退出时置位（OSAllocatedUnfairLock 满足 Sendable，无 await 开销）
+        let finished = OSAllocatedUnfairLock(initialState: false)
+
         return try await withThrowingTaskGroup(of: String.self) { group in
             // 任务 1：实际命令执行
             group.addTask {
-                try await Self.executeOnClient(client, command: command)
+                defer { finished.withLock { $0 = true } }
+                return try await Self.executeOnClient(client, command: command)
             }
 
-            // 任务 2：超时守卫
-            group.addTask {
+            // 任务 2：超时守卫 + 宽限 watchdog
+            group.addTask { [weak self] in
                 try await Task.sleep(for: .seconds(timeout))
+                // 宽限 watchdog：取消信号发出后，执行子任务若仍未在宽限期内退出，
+                // 说明其挂在不可取消的 NIO future 上（半开连接）——强制关闭整条连接，
+                // fail 所有挂起 future，解除 task group 的隐式等待。
+                Task.detached {
+                    try? await Task.sleep(for: .seconds(Self.hangGraceSeconds))
+                    if !finished.withLock({ $0 }) {
+                        await self?.forceCloseAfterHang()
+                    }
+                }
                 throw SSHError.timeout
             }
 
@@ -216,6 +230,18 @@ actor NIOSSHClient: SSHClientProtocol {
         }
     }
 
+    /// 超时宽限期（秒）：超时取消后执行子任务仍未退出则判定连接挂死。
+    private static let hangGraceSeconds: TimeInterval = 5
+
+    /// 挂死强制断连：关闭底层连接以 fail 所有挂起的 NIO future，并统一走断线回调通知上层。
+    /// watchdog 持 weak self：actor 已释放则无连接可关，静默退出。
+    private func forceCloseAfterHang() async {
+        guard let client else { return }
+        print("[SSH] Execute hang detected after timeout grace period, force closing connection")
+        try? await client.close()
+        markDisconnected()
+    }
+
     /// 在指定 SSHClient 上执行命令（纯函数，不依赖 actor 状态）。
     nonisolated private static func executeOnClient(_ client: SSHClient, command: String) async throws -> String {
         do {
@@ -224,6 +250,7 @@ actor NIOSSHClient: SSHClientProtocol {
             var stderr = ByteBuffer()
 
             for try await chunk in stream {
+                try Task.checkCancellation()  // 对齐 executeStreaming：超时取消后立即退出，不再消费到流自然结束
                 switch chunk {
                 case .stdout(var buffer):
                     stdout.writeBuffer(&buffer)

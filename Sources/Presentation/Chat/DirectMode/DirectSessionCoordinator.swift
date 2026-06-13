@@ -18,6 +18,8 @@ enum DirectSessionEvent: Sendable {
     case contextSummaryReady(String)
     /// 错误信息。
     case error(String)
+    /// 代理请求用户审批工具调用。
+    case permissionRequested(ACPPermissionRequest)
 }
 
 /// DirectSessionCoordinator：
@@ -199,6 +201,7 @@ final class DirectSessionCoordinator {
 
     /// 取消当前正在执行的 prompt。
     func cancelPrompt() {
+        resolvePermission(approved: false)
         guard canCancel else { return }
         directPromptTask?.cancel()
         directPromptTask = nil
@@ -214,6 +217,7 @@ final class DirectSessionCoordinator {
     /// - Parameter messages: 当前聊天消息列表，用于提取直连模式期间的对话摘要。
     @discardableResult
     func disconnect(messages: [Message] = []) async -> String? {
+        resolvePermission(approved: false)
         guard let agent = state.activeAgent else { return nil }
         let sessionToken = state.currentSessionToken
         let agentName = agent.name
@@ -264,6 +268,7 @@ final class DirectSessionCoordinator {
     /// context break 后旋转 session：断开旧 session，创建新 session，保留 agent 身份。
     @discardableResult
     func rotateAfterContextBreak() async -> Bool {
+        resolvePermission(approved: false)
         guard let agent = activeAgentInfo, let currentSession = directSession else { return false }
 
         directPromptTask?.cancel()
@@ -303,6 +308,40 @@ final class DirectSessionCoordinator {
         connectTask?.cancel()
         connectTask = nil
         resetToIdle()
+    }
+
+    // MARK: - 直连审批
+
+    /// 待决审批 continuation（单槽：同一 session 串行发权限请求，单槽足够）。
+    private var pendingPermissionContinuation: CheckedContinuation<Bool, Never>?
+    /// 审批超时任务句柄。
+    private var permissionTimeoutTask: Task<Void, Never>?
+    /// 审批超时时长（秒）：超时自动 deny，防止代理侧永久挂起。
+    private static let permissionTimeoutSeconds: TimeInterval = 300
+
+    /// 挂起等待用户审批（permission handler 回调入口，MainActor 串行）。
+    private func requestPermission(_ request: ACPPermissionRequest) async -> Bool {
+        // 防御：清掉可能残留的旧请求（one-shot，无残留时为 no-op）
+        resolvePermission(approved: false)
+        return await withCheckedContinuation { continuation in
+            pendingPermissionContinuation = continuation
+            eventContinuation.yield(.permissionRequested(request))
+            permissionTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.permissionTimeoutSeconds))
+                guard !Task.isCancelled else { return }
+                self?.resolvePermission(approved: false)
+            }
+        }
+    }
+
+    /// 用户审批结果回填（UI 调用；one-shot，无待决请求时为 no-op）。
+    /// 参照 TaskExecutionCoordinator.resolveApprovalContinuation 的唯一 resume 入口模式。
+    func resolvePermission(approved: Bool) {
+        guard let continuation = pendingPermissionContinuation else { return }
+        pendingPermissionContinuation = nil
+        permissionTimeoutTask?.cancel()
+        permissionTimeoutTask = nil
+        continuation.resume(returning: approved)
     }
 
     // MARK: - 配置操作
@@ -510,6 +549,12 @@ final class DirectSessionCoordinator {
                 guard self.sessionIdentity(session) == sessionID else { return }
                 await self.syncSessionMetadata(from: session)
             }
+        }
+
+        await session.setPermissionHandler { [weak self] request in
+            guard let self else { return false }
+            // @Sendable 闭包跨隔离 await MainActor 方法，自动 hop 回主线程挂起等待
+            return await self.requestPermission(request)
         }
     }
 

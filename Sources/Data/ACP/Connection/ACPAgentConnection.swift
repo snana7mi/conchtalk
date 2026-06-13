@@ -16,6 +16,7 @@ actor ACPAgentConnection: AgentConnection {
     private var updateHandler: (@Sendable (SessionUpdate) -> Void)?
     private var disconnectHandler: (@Sendable () -> Void)?
     private var configUpdateHandler: (@Sendable () -> Void)?
+    private var permissionHandler: (@Sendable (ACPPermissionRequest) async -> Bool)?
 
     /// Agent 广播的 config/model/mode 状态。
     private(set) var configOptions: [SessionConfigOption] = []
@@ -38,6 +39,10 @@ actor ACPAgentConnection: AgentConnection {
 
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void) {
         configUpdateHandler = handler
+    }
+
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) {
+        permissionHandler = handler
     }
 
     func connect(cwd: String) async throws -> AgentConnectionInfo {
@@ -68,6 +73,10 @@ actor ACPAgentConnection: AgentConnection {
             // 必须在 connect() 前注册 handler，避免丢失握手期间的通知
             await candidateConnection.setUpdateHandler { [weak self] update in
                 Task { await self?.forwardUpdate(update) }
+            }
+            // 与 setUpdateHandler 同点位：connect() 前注册，避免丢失握手期间的权限请求
+            if let permissionHandler = await self?.permissionHandler {
+                await candidateConnection.setPermissionHandler(permissionHandler)
             }
 
             do {

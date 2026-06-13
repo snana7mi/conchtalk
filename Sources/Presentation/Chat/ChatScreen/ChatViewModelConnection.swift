@@ -194,6 +194,10 @@ extension ChatViewModel {
 
     /// 断开 SSH 连接并清理所有相关资源（断开连接按钮点击时调用）。
     func disconnectAndCleanup() async {
+        // 显式取消事件消费任务：结构性弱引用已防泄漏，
+        // 此处保证主动断开后不再处理迟到事件（cancel 在下一个事件到达时生效）
+        directEventTask?.cancel()
+        directEventTask = nil
         // 先清理 AI 任务和直连会话
         await closeSession()
         // 走完整的断开流程（设置 isConnected、插入"SSH 已断开"消息）

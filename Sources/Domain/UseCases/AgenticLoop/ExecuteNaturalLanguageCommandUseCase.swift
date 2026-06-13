@@ -193,7 +193,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     switch interceptResult.interceptResult {
                     case .continueLoop(let output):
                         response = try await nextResponseAfterToolResult(
-                            output: output, toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                            output: output, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                         )
                         continue
                     case .exitLoop:
@@ -231,7 +231,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                             history.append(toolResult)
                             pendingToolCalls.removeAll()
                             response = try await nextResponseAfterToolResult(
-                                output: deniedOutput, toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                                output: deniedOutput, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                             )
                             continue
                         }
@@ -264,7 +264,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     history.append(toolResult)
                     // 汇总文本作为唯一模型可见 tool result 回填给主模型，进入下一轮。
                     response = try await nextResponseAfterToolResult(
-                        output: dispatchOutput, toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                        output: dispatchOutput, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
                     continue
                 }
@@ -278,7 +278,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
 
                     response = try await nextResponseAfterToolResult(
                         output: "ERROR: Unknown tool '\(toolCall.toolName)'",
-                        toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                        toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
                     continue
                 }
@@ -301,7 +301,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
 
                     response = try await nextResponseAfterToolResult(
                         output: "ERROR: Invalid arguments",
-                        toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                        toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
                     continue
                 }
@@ -337,7 +337,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
 
                     let modelOutput = result.output
                     response = try await nextResponseAfterToolResult(
-                        output: modelOutput, toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                        output: modelOutput, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
 
                 case .executionError(let errorOutput):
@@ -348,7 +348,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     await onIntermediateMessage?(errorMsg)
 
                     response = try await nextResponseAfterToolResult(
-                        output: errorOutput, toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                        output: errorOutput, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
 
                 case .denied:
@@ -371,7 +371,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     // 回填拒绝结果，让 AI 自然语言回复（可能换个方式、也可能直接总结）
                     response = try await nextResponseAfterToolResult(
                         output: "DENIED: User rejected this tool call. Acknowledge the denial briefly and either suggest an alternative approach or ask the user what they'd like to do instead.",
-                        toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                        toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
 
                 case .forbidden:
@@ -383,13 +383,13 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
 
                     var finalResponse = try await nextResponseAfterToolResult(
                         output: "BLOCKED: This operation is forbidden for safety reasons. Explain to the user why and stop.",
-                        toolCall: toolCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                        toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
                     // AI 可能先返回更多 toolCall（多 tool 同轮），持续回填拒绝直到拿到文本回复。
                     while case .toolCall(let pendingCall, _) = finalResponse {
                         finalResponse = try await nextResponseAfterToolResult(
                             output: "BLOCKED: All tool calls are terminated due to a prior safety violation.",
-                            toolCall: pendingCall, history: history, serverContext: serverContext, serverCapabilities: capabilities
+                            toolCall: pendingCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                         )
                     }
                     if case .text(let text, let reasoning) = finalResponse {
@@ -450,16 +450,17 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     private var pendingToolCalls: [ToolCall] = []
 
     /// 工具执行结果回填后决定下一步：若队列中还有待处理的 tool call 则直接返回，否则请求 AI。
+    /// 请求 AI 前做循环内压缩重估（修改调用方的 history）。
     /// - Parameters:
     ///   - output: 刚执行完的工具输出文本。
     ///   - toolCall: 对应的工具调用信息。
-    ///   - history: 当前完整会话历史。
+    ///   - history: 当前完整会话历史（inout：压缩会原地裁剪）。
     ///   - serverContext: 服务器上下文。
     /// - Returns: 下一个 tool call（队列非空时）或 AI 的新响应。
     private func nextResponseAfterToolResult(
         output: String,
         toolCall: ToolCall,
-        history: [Message],
+        history: inout [Message],
         serverContext: String,
         serverCapabilities: ServerCapabilities
     ) async throws -> AIResponse {
@@ -467,11 +468,38 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
         if !pendingToolCalls.isEmpty {
             return .toolCall(pendingToolCalls.removeFirst(), reasoning: nil)
         }
-        return try await sendWithStreaming { [history] in
+        // 循环内压缩：每轮请求 AI 前重估 token，剩余预算不足时裁剪 history
+        await compactInLoopIfNeeded(&history, serverContext: serverContext)
+        // inout 参数不能被 escaping 闭包捕获，先取值快照
+        let snapshot = history
+        return try await sendWithStreaming { [snapshot] in
             self.aiService.sendToolResultStreaming(
-                output, forToolCall: toolCall, conversationHistory: history, serverContext: serverContext, serverID: self.serverID, permissionLevel: self.permissionLevel, serverName: self.serverName, serverCapabilities: serverCapabilities
+                output, forToolCall: toolCall, conversationHistory: snapshot, serverContext: serverContext, serverID: self.serverID, permissionLevel: self.permissionLevel, serverName: self.serverName, serverCapabilities: serverCapabilities
             )
         }
+    }
+
+    /// 循环内按需压缩：轻量估算（不查记忆）+ 复用 ContextCompactor 裁剪。
+    /// 仅剩余预算 < compactionReserve(20k) 时触发；依赖问题 1 的 .aiContext 摘要类型，
+    /// 否则压缩产物会被 MessageBuilder 重写丢失。
+    private func compactInLoopIfNeeded(_ history: inout [Message], serverContext: String) async {
+        guard let builder = contextBuilder, let compactor = contextCompactor, let serverID else { return }
+        let (estimated, needed) = builder.estimateCompactionNeed(
+            systemPrompt: serverContext,
+            messages: history,
+            maxContextTokens: maxContextTokens
+        )
+        guard needed else { return }
+        await onContextCompressing?(true)
+        if let result = await compactor.compactIfNeeded(
+            serverID: serverID,
+            messages: history,
+            maxContextTokens: maxContextTokens,
+            currentTokens: estimated
+        ) {
+            history = result.compactedMessages
+        }
+        await onContextCompressing?(false)
     }
 
     private func sendWithStreaming(_ streamFactory: @escaping @Sendable () -> AsyncStream<StreamingDelta>) async throws -> AIResponse {

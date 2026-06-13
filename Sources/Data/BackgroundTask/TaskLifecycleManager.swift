@@ -20,6 +20,9 @@ struct BackgroundTask {
     let serverID: UUID
     let serverName: String
     let serverIconData: Data?
+    /// 任务代次：由 registerTask 分配（单调递增），强清 watchdog 用于身份比对，
+    /// 防止旧任务的兜底误清同 serverID 的后续新任务。
+    var generation: UInt64 = 0
 }
 
 /// TaskLifecycleManager：
@@ -32,8 +35,24 @@ final class TaskLifecycleManager {
     /// 内部任务存储。
     private var backgroundTasks: [UUID: BackgroundTask] = [:]
 
-    /// cancelAndWait 等待清理完成的 continuation 队列。
-    private var cleanupContinuations: [UUID: [CheckedContinuation<Void, Never>]] = [:]
+    /// CleanupWaiter：cancelAndWait / cancelTasks 的等待者——continuation + 对应的兜底 watchdog 句柄。
+    private struct CleanupWaiter {
+        let continuation: CheckedContinuation<Void, Never>
+        let watchdog: Task<Void, Never>
+    }
+
+    /// 等待清理完成的等待者队列（替代旧 cleanupContinuations，watchdog 随 continuation 同生命周期管理）。
+    private var cleanupWaiters: [UUID: [CleanupWaiter]] = [:]
+
+    /// 强清兜底等待时长（测试注入短值）。
+    private let forceCleanupTimeout: Duration
+
+    /// 任务代次计数器：registerTask 时自增分配。
+    private var nextGeneration: UInt64 = 0
+
+    init(forceCleanupTimeout: Duration = .seconds(5)) {
+        self.forceCleanupTimeout = forceCleanupTimeout
+    }
 
     /// 查询是否有活跃任务。
     func hasActiveTask(for id: UUID) -> Bool { backgroundTasks[id] != nil }
@@ -44,9 +63,12 @@ final class TaskLifecycleManager {
     /// 所有活跃任务的服务器 ID。
     var activeServerIDs: [UUID] { Array(backgroundTasks.keys) }
 
-    /// 注册新任务。
+    /// 注册新任务（内部分配代次，调用方无需关心 generation）。
     func registerTask(_ task: BackgroundTask) {
-        backgroundTasks[task.serverID] = task
+        var registered = task
+        nextGeneration += 1
+        registered.generation = nextGeneration
+        backgroundTasks[task.serverID] = registered
         activeTaskServerIDs.insert(task.serverID)
     }
 
@@ -56,7 +78,7 @@ final class TaskLifecycleManager {
     }
 
     /// 取消指定服务器的任务并等待清理完成（含 defer cleanupTask 和持久化）。
-    /// 通过 continuation 等待 cleanupTask 完成通知，最多 5 秒超时后强制清理。
+    /// 通过 continuation 等待 cleanupTask 完成通知，超过兜底时长后强制清理。
     func cancelAndWait(for id: UUID, onForceCleanup: @escaping () -> Void) async {
         guard backgroundTasks[id] != nil else { return }
         backgroundTasks[id]?.task.cancel()
@@ -64,18 +86,18 @@ final class TaskLifecycleManager {
         // 任务已清理则直接返回
         guard backgroundTasks[id] != nil else { return }
 
-        // 通过 continuation 等待 cleanupTask 完成，配合超时兜底
+        // 捕获发起取消时刻的任务代次，watchdog 凭此比对身份
+        let expectedGeneration = backgroundTasks[id]?.generation
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            cleanupContinuations[id, default: []].append(continuation)
-
-            // 超时兜底：5 秒后若仍未被 cleanupTask resume，则强制清理并 resume
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, let self else { return }
-                guard self.backgroundTasks[id] != nil else { return }
-                print("[BTM] cancelAndWait: \(id) timed out, force cleanup")
-                onForceCleanup()
-            }
+            let watchdog = makeForceCleanupWatchdog(
+                id: id,
+                expectedGeneration: expectedGeneration,
+                label: "cancelAndWait",
+                onForceCleanup: onForceCleanup
+            )
+            cleanupWaiters[id, default: []].append(
+                CleanupWaiter(continuation: continuation, watchdog: watchdog)
+            )
         }
     }
 
@@ -99,19 +121,39 @@ final class TaskLifecycleManager {
         // 通过 continuation 等待各任务 cleanupTask 完成，配合超时兜底
         for taskID in taskIDs {
             guard self.backgroundTasks[taskID] != nil else { continue }
+            let expectedGeneration = self.backgroundTasks[taskID]?.generation
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                self.cleanupContinuations[taskID, default: []].append(continuation)
-
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(5))
-                    guard !Task.isCancelled, let self else { return }
-                    guard self.backgroundTasks[taskID] != nil else { return }
-                    print("[BTM] cancelTasks: \(taskID) timed out, force cleanup")
-                    onForceCleanup(taskID)
-                }
+                let watchdog = makeForceCleanupWatchdog(
+                    id: taskID,
+                    expectedGeneration: expectedGeneration,
+                    label: "cancelTasks",
+                    onForceCleanup: { onForceCleanup(taskID) }
+                )
+                self.cleanupWaiters[taskID, default: []].append(
+                    CleanupWaiter(continuation: continuation, watchdog: watchdog)
+                )
             }
         }
         return taskIDs
+    }
+
+    /// 创建强清兜底 watchdog：睡满兜底时长后，仅当「当初被取消的那个任务」仍在册时才强清。
+    /// 双保险：① 正常清理路径会在 resume 前取消本 Task；② generation 不符（旧任务已清、
+    /// 新任务已注册）时静默退出，绝不动新任务。
+    private func makeForceCleanupWatchdog(
+        id: UUID,
+        expectedGeneration: UInt64?,
+        label: String,
+        onForceCleanup: @escaping () -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor [weak self, forceCleanupTimeout] in
+            try? await Task.sleep(for: forceCleanupTimeout)
+            guard !Task.isCancelled, let self else { return }
+            guard let current = self.backgroundTasks[id],
+                  current.generation == expectedGeneration else { return }
+            print("[BTM] \(label): \(id) timed out, force cleanup")
+            onForceCleanup()
+        }
     }
 
     /// CLEANUP INVARIANT — this ordering is safety-critical:
@@ -166,11 +208,12 @@ final class TaskLifecycleManager {
         resumeCleanupContinuations(for: id)
     }
 
-    /// resume 并移除指定服务器的所有 cleanup continuation。
+    /// resume 并移除指定服务器的所有 cleanup 等待者，同步取消其兜底 watchdog。
     private func resumeCleanupContinuations(for id: UUID) {
-        guard let continuations = cleanupContinuations.removeValue(forKey: id) else { return }
-        for continuation in continuations {
-            continuation.resume()
+        guard let waiters = cleanupWaiters.removeValue(forKey: id) else { return }
+        for waiter in waiters {
+            waiter.watchdog.cancel()
+            waiter.continuation.resume()
         }
     }
 

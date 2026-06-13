@@ -12,14 +12,6 @@ import Foundation
 @MainActor @Observable
 final class TaskExecutionCoordinator {
 
-    // MARK: - Event Stream
-
-    /// 任务执行事件流，供上层观察者（如 ChatViewModel）消费。
-    let eventStream: AsyncStream<TaskExecutionEvent>
-
-    /// 事件流 continuation，用于在执行过程中 yield 事件。
-    private let eventContinuation: AsyncStream<TaskExecutionEvent>.Continuation
-
     // MARK: - Owned Components
 
     /// per-server FIFO 排队管理。
@@ -83,9 +75,6 @@ final class TaskExecutionCoordinator {
         notificationService: NotificationService,
         subagentRegistry: SubagentRegistry
     ) {
-        let (stream, continuation) = AsyncStream.makeStream(of: TaskExecutionEvent.self)
-        self.eventStream = stream
-        self.eventContinuation = continuation
         self.taskQueue = taskQueue
         self.stateStore = stateStore
         self.lifecycleManager = lifecycleManager
@@ -97,10 +86,6 @@ final class TaskExecutionCoordinator {
         self.keepAlive = keepAlive
         self.notificationService = notificationService
         self.subagentRegistry = subagentRegistry
-    }
-
-    deinit {
-        eventContinuation.finish()
     }
 
     // MARK: - Public API: Background Keep Alive
@@ -119,21 +104,25 @@ final class TaskExecutionCoordinator {
     // MARK: - Public API: Queue Access
 
     /// 取消指定排队任务。
-    func cancelQueuedTask(serverID: UUID, taskID: UUID) {
+    /// - Returns: 是否真正从队列移除（false 表示该 ID 不在队列中——尚未入队或已开始执行）。
+    @discardableResult
+    func cancelQueuedTask(serverID: UUID, taskID: UUID) -> Bool {
         taskQueue.cancel(serverID: serverID, taskID: taskID)
     }
 
     // MARK: - Public API: Enqueue
 
     /// 将指令排入队列；若该服务器当前无活跃任务，则立即启动。
+    /// - Parameter taskID: 任务 ID；传入触发该任务的用户消息 ID，使撤回/执行态判定与消息精确对应。
     func enqueueTask(
+        taskID: UUID = UUID(),
         serverID: UUID,
         text: String,
         server: Server,
         messages: [Message],
         attachments: [FileAttachment] = []
     ) {
-        let queued = QueuedTask(serverID: serverID, text: text, attachments: attachments)
+        let queued = QueuedTask(id: taskID, serverID: serverID, text: text, attachments: attachments)
         taskQueue.enqueue(queued)
         if !lifecycleManager.hasActiveTask(for: serverID) {
             dequeueAndExecuteNext(serverID: serverID, messages: messages, server: server)
@@ -175,6 +164,13 @@ final class TaskExecutionCoordinator {
     /// 查询是否有活跃任务。
     func hasActiveTask(for serverID: UUID) -> Bool {
         lifecycleManager.hasActiveTask(for: serverID)
+    }
+
+    /// 指定任务是否正在执行（taskID == 触发它的用户消息 ID）。
+    /// 供撤回逻辑区分「尚未入队」与「已 dequeue 正在执行」。
+    func isExecutingTask(taskID: UUID, serverID: UUID) -> Bool {
+        lifecycleManager.hasActiveTask(for: serverID)
+            && stateStore.state(for: serverID)?.currentTaskID == taskID
     }
 
     // MARK: - Public API: Observer
@@ -252,6 +248,7 @@ final class TaskExecutionCoordinator {
         guard let next = taskQueue.dequeue(for: serverID) else { return }
         do {
             try startTask(
+                taskID: next.id,
                 serverID: serverID,
                 text: next.text,
                 messages: messages,
@@ -266,6 +263,7 @@ final class TaskExecutionCoordinator {
 
     /// 启动任务执行。
     private func startTask(
+        taskID: UUID,
         serverID: UUID,
         text: String,
         messages: [Message],
@@ -276,8 +274,11 @@ final class TaskExecutionCoordinator {
             throw BackgroundTaskError.alreadyRunning
         }
 
-        // 初始化流式状态
-        stateStore.initState(for: serverID, state: TaskStreamingState(isStreaming: true))
+        // 初始化流式状态（携带当前执行任务 ID，供排队标记摘除与撤回判定使用）
+        stateStore.initState(
+            for: serverID,
+            state: TaskStreamingState(isStreaming: true, currentTaskID: taskID)
+        )
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -321,7 +322,6 @@ final class TaskExecutionCoordinator {
                 type: .error,
                 toServer: serverID
             )
-            eventContinuation.yield(.failed(serverID: serverID, error: SSHError.notConnected))
             return
         }
 
@@ -394,7 +394,6 @@ final class TaskExecutionCoordinator {
 
             // 持久化结果消息
             try? await messageRepository.appendMessages(resultMessages, toServer: serverID)
-            eventContinuation.yield(.completed(serverID: serverID, resultMessages: resultMessages))
 
             // 后处理
             if let bgTask = lifecycleManager.task(for: serverID) {
@@ -422,7 +421,6 @@ final class TaskExecutionCoordinator {
                     try? await messageRepository.appendMessage(partialMsg, toServer: serverID)
                 }
             }
-            eventContinuation.yield(.cancelled(serverID: serverID))
         } catch {
             guard lifecycleManager.hasActiveTask(for: serverID) else { return }
             print("[TEC] Task error for server \(serverID): \(error)")
@@ -432,7 +430,6 @@ final class TaskExecutionCoordinator {
                 type: .error,
                 toServer: serverID
             )
-            eventContinuation.yield(.failed(serverID: serverID, error: error))
         }
     }
 
@@ -466,7 +463,6 @@ final class TaskExecutionCoordinator {
                 $0.isReasoningActive = true
             }
             self.stateStore.scheduleNotify(for: serverID)
-            self.eventContinuation.yield(.reasoningUpdate(accumulated))
         }
 
         useCase.onContentUpdate = { [weak self] accumulated in
@@ -476,7 +472,6 @@ final class TaskExecutionCoordinator {
                 $0.isReasoningActive = false
             }
             self.stateStore.scheduleNotify(for: serverID)
-            self.eventContinuation.yield(.contentUpdate(accumulated))
         }
 
         useCase.onAgentStreamEvents = { [weak self] events in
@@ -492,21 +487,18 @@ final class TaskExecutionCoordinator {
                 }
             }
             self.stateStore.scheduleNotify(for: serverID)
-            self.eventContinuation.yield(.agentStreamEvents(events))
         }
 
         useCase.onToolOutputUpdate = { [weak self] output in
             guard let self, self.lifecycleManager.hasActiveTask(for: serverID) else { return }
             self.stateStore.updateState(for: serverID) { $0.liveToolOutput = output }
             self.stateStore.scheduleNotify(for: serverID)
-            self.eventContinuation.yield(.toolOutputUpdate(output))
         }
 
         useCase.onContextCompressing = { [weak self] active in
             guard let self, self.lifecycleManager.hasActiveTask(for: serverID) else { return }
             self.stateStore.updateState(for: serverID) { $0.isContextCompressing = active }
             self.notifyStateChange(for: serverID)
-            self.eventContinuation.yield(.contextCompressing(active))
         }
 
         useCase.onIntermediateMessage = { [weak self] message in
@@ -523,7 +515,6 @@ final class TaskExecutionCoordinator {
                 $0.agentStreamEvents = []
             }
             self.notifyStateChange(for: serverID)
-            self.eventContinuation.yield(.intermediateMessage(message))
 
             if !self.isAppInForeground {
                 self.keepAlive.endBackgroundKeepAlive()
@@ -546,7 +537,6 @@ final class TaskExecutionCoordinator {
             $0.confirmationDeadline = deadline
         }
         notifyStateChange(for: serverID)
-        eventContinuation.yield(.toolCallNeedsConfirmation(toolCall, deadline: deadline))
 
         // 等待审批
         let result = await waitForApproval(serverID: serverID)
@@ -580,9 +570,6 @@ final class TaskExecutionCoordinator {
             $0.agentHomePath = homePath
         }
         notifyStateChange(for: serverID)
-        eventContinuation.yield(.agentConnectionSuggested(
-            preferredAgent: preferredAgent, cwd: cwd, directories: directories, homePath: homePath
-        ))
 
         // 等待连接决策
         let result = await waitForAgentConnection(serverID: serverID)

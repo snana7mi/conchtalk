@@ -96,7 +96,7 @@ actor ContextCompactor {
         let summaryMessage = Message(
             role: .system,
             content: "[Context compacted — earlier conversation summary]\n\(summaryText)",
-            systemMessageType: .info
+            systemMessageType: .aiContext  // .info 会被 MessageBuilder 重写为 "Connected to server"；.aiContext 透传 content
         )
         let compactedMessages = [summaryMessage] + recentMessages
 

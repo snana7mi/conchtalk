@@ -33,6 +33,9 @@ nonisolated struct TaskStreamingState {
     var agentDirectories: [String]? = nil
     /// 目录列表对应的 home 路径。
     var agentHomePath: String? = nil
+    /// 当前正在执行的任务 ID（== 触发它的用户消息 ID，由 enqueueTask 的 taskID 贯通保证）。
+    /// 默认 nil，所有既有构造点向后兼容。
+    var currentTaskID: UUID? = nil
 }
 
 // MARK: - TaskStreamingStateStore

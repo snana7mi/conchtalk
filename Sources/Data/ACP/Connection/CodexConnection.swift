@@ -142,6 +142,10 @@ actor CodexConnection: AgentConnection {
 
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void) {}
 
+    /// Codex 走自有审批协议（app-server user_input 流），本期不接入 UI 审批流；
+    /// 空实现满足 AgentConnection 协议（见 spec 2.2 范围说明）。
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) {}
+
     func connect(cwd: String) async throws -> AgentConnectionInfo {
         let proc = SSHProcessTransport(sshClient: sshClient, command: "codex app-server")
         try await proc.start()

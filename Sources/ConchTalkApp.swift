@@ -215,6 +215,9 @@ struct ConchTalkApp: App {
                 store: container.store,
                 keychainService: container.keychainService
             )
+            // 凭据条目 accessibility 一次性迁移（.task 在前台首帧后执行，设备必然解锁，
+            // 满足 SecItemUpdate 重新加密的前置条件）
+            container.keychainService.migrateCredentialAccessibilityIfNeeded()
             container.notificationService.requestAuthorization()
             // 冷启动恢复：已登录用户拉取最新 tier（重装后 UserDefaults 丢失，依赖此处刷新）
             let wasLoggedInAtLaunch = container.authService.isLoggedIn
@@ -262,8 +265,7 @@ struct ConchTalkApp: App {
             }
             // 已登录且同步已开启但本次启动尚未同步过（如正常启动非重装场景），也执行一次拉取
             if SyncState.isEnabled && container.authService.isLoggedIn {
-                let lastPull = SyncState.lastPullTimestamp
-                if lastPull == "1970-01-01T00:00:00Z" {
+                if SyncState.lastPulledSeq == 0 {
                     print("[App] Sync enabled but never pulled, starting recovery sync...")
                     await container.syncService.sync()
                     print("[App] Recovery sync completed")

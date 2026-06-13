@@ -650,4 +650,104 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
         #expect(aiService.callCount("sendMessageStreaming") == 1)
         #expect(aiService.callCount("sendToolResultStreaming") == 2)
     }
+
+    // MARK: - 循环内压缩（问题 6a）
+
+    /// 构造带压缩依赖的用例：MockTool 每轮回大输出，注入小 maxContextTokens。
+    /// 注意：ToolExecutionResult.init 自带 8000 字符硬截断，单轮输出须 ≤ 8000 字符才能精确控制
+    /// token 数学，靠轮数累积把历史推过压缩阈值。
+    private func makeCompactingUseCase(
+        toolOutputChars: Int,
+        maxContextTokens: Int,
+        rounds: Int = 5
+    ) -> (ExecuteNaturalLanguageCommandUseCase, MockAIService) {
+        let aiService = MockAIService()
+        aiService.simpleMessageResult = "MID-TASK SUMMARY"  // ContextCompactor 的摘要返回
+
+        // rounds 轮 toolCall + 最后一轮文本回复（分步赋值帮助字面量类型推断）
+        let toolCall = TestFixtures.makeToolCall(toolName: "mock_tool", arguments: [:])
+        var responses: [[StreamingDelta]] = (0..<rounds).map { _ in [.toolCall(toolCall), .done] }
+        responses.append([.content("done"), .done])
+        aiService.streamingResponses = responses
+
+        let registry = MockToolRegistry()
+        let tool = MockTool()
+        tool.name = "mock_tool"
+        tool.executeResult = ToolExecutionResult(
+            output: String(repeating: "y", count: toolOutputChars))
+        registry.register(tool)
+
+        let useCase = ExecuteNaturalLanguageCommandUseCase(
+            aiService: aiService,
+            sshClient: MockSSHClient(),
+            toolRegistry: registry,
+            serverID: UUID(),  // 压缩链路需要 serverID
+            permissionLevel: .standard
+        )
+        let memoryService = MockMemoryService()
+        let entryStore = MockMemoryEntryStore()
+        useCase.contextBuilder = ContextBuilder(memoryContextProvider: memoryService)
+        useCase.contextCompactor = ContextCompactor(
+            aiService: aiService,
+            retainService: RetainService(
+                aiService: aiService, memoryWriter: memoryService, entryStore: entryStore),
+            reflectService: ReflectService(
+                aiService: aiService, entryStore: entryStore,
+                memoryWriter: memoryService, memoryReader: memoryService)
+        )
+        useCase.maxContextTokens = maxContextTokens
+        return (useCase, aiService)
+    }
+
+    @Test("循环中段历史超限时触发压缩")
+    func loopCompactsWhenHistoryGrowsMidTask() async throws {
+        // 每轮工具输出 7_900 ASCII 字符 ≈ 1_975 token（低于实体 8K 截断，数学精确）；
+        // 窗口 45_000，reserve 20_000 → 估算超过 25_000（约第 13 轮）后剩余预算 < 20k，
+        // 且历史超过 recentTokenBudget(20k)，压缩在循环中段真实触发并裁剪头部
+        let (useCase, aiService) = makeCompactingUseCase(
+            toolOutputChars: 7_900, maxContextTokens: 45_000, rounds: 15)
+
+        var compressingEvents: [Bool] = []
+        useCase.onContextCompressing = { compressingEvents.append($0) }
+
+        let messages = try await useCase.execute(
+            userMessage: "do heavy work",
+            conversationHistory: [],
+            serverContext: "ctx"
+        )
+
+        // 压缩被触发：true/false 回调 + ContextCompactor 的摘要调用
+        #expect(compressingEvents.contains(true))
+        #expect(compressingEvents.contains(false))
+        #expect(aiService.didCall("sendSimpleMessage"))
+        // 压缩后某次工具结果请求的 history 首条为 .aiContext 摘要
+        let toolResultCalls = aiService.callHistory.filter { $0.method == "sendToolResultStreaming" }
+        let compactedCall = toolResultCalls.first { call in
+            call.history?.first?.systemMessageType == .aiContext
+        }
+        #expect(compactedCall != nil)
+        // 任务仍正常收敛到文本回复
+        #expect(messages.last?.role == .assistant)
+        #expect(messages.last?.content == "done")
+    }
+
+    @Test("低于阈值时循环内不触发压缩")
+    func loopNoCompactionBelowThreshold() async throws {
+        // 小输出（100 字符/轮）+ 默认大窗口：永不触发
+        let (useCase, aiService) = makeCompactingUseCase(
+            toolOutputChars: 100, maxContextTokens: 100_000)
+
+        var compressingEvents: [Bool] = []
+        useCase.onContextCompressing = { compressingEvents.append($0) }
+
+        let messages = try await useCase.execute(
+            userMessage: "light work",
+            conversationHistory: [],
+            serverContext: "ctx"
+        )
+
+        #expect(compressingEvents.isEmpty)
+        #expect(!aiService.didCall("sendSimpleMessage"))
+        #expect(messages.last?.content == "done")
+    }
 }

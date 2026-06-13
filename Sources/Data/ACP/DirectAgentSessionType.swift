@@ -13,6 +13,7 @@ protocol DirectAgentSessionType: Actor {
     func setUpdateHandler(_ handler: @escaping @Sendable (SessionUpdate) -> Void) async
     func setDisconnectHandler(_ handler: @escaping @Sendable () -> Void) async
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void) async
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) async
 
     @discardableResult
     func connect(cwd: String?) async throws -> String

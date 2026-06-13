@@ -20,6 +20,30 @@ extension ChatView {
                 }
             }
             .alert(
+                String(localized: "Agent Permission Request", bundle: LanguageSettings.currentBundle),
+                isPresented: Binding(
+                    get: { viewModel.directPermissionRequest != nil },
+                    set: { if !$0 {
+                        viewModel.directSessionCoordinator.resolvePermission(approved: false)
+                        viewModel.directPermissionRequest = nil
+                    } }
+                )
+            ) {
+                Button(String(localized: "Allow", bundle: LanguageSettings.currentBundle)) {
+                    viewModel.directSessionCoordinator.resolvePermission(approved: true)
+                    viewModel.directPermissionRequest = nil
+                }
+                Button(String(localized: "Deny", bundle: LanguageSettings.currentBundle), role: .cancel) {
+                    viewModel.directSessionCoordinator.resolvePermission(approved: false)
+                    viewModel.directPermissionRequest = nil
+                }
+            } message: {
+                if let request = viewModel.directPermissionRequest {
+                    // 请求描述来自代理原文，不做本地化
+                    Text(request.description)
+                }
+            }
+            .alert(
                 viewModel.agentPicker.title,
                 isPresented: $viewModel.agentPicker.showAgentPicker
             ) {

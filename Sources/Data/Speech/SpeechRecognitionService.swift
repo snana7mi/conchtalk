@@ -7,7 +7,7 @@ import Speech
 /// 使用 @Observable 驱动 UI 状态更新，音频回调在音频线程执行。
 @MainActor
 @Observable
-final class SpeechRecognitionService: SpeechRecognitionProtocol, @unchecked Sendable {
+final class SpeechRecognitionService: SpeechRecognitionProtocol {
     // MARK: - 公开状态
 
     /// 当前识别状态
@@ -32,10 +32,8 @@ final class SpeechRecognitionService: SpeechRecognitionProtocol, @unchecked Send
     private var lastResultTime: Date?
     private var silenceTimer: Task<Void, Never>?
     private var finalText: String = ""
-    /// 已确认的前序片段累积文本（用户停顿后，识别器可能只返回新片段，需保留之前内容）
-    private var confirmedText: String = ""
-    /// 当前片段中最近一次 partial result 的文本
-    private var lastPartialText: String = ""
+    /// 片段累积状态机（重置检测 + 确认文本累积），仅在 MainActor 上读写。
+    private var segmentAccumulator = SpeechSegmentAccumulator()
 
     // MARK: - 初始化
 
@@ -90,13 +88,12 @@ final class SpeechRecognitionService: SpeechRecognitionProtocol, @unchecked Send
         lastResultTime = nil
         silenceTimer?.cancel()
         finalText = ""
-        confirmedText = ""
-        lastPartialText = ""
+        segmentAccumulator.reset()
         state = .listening(partialText: "")
 
-        // 安装音频 tap（仅送入识别器，不做 RMS 检测）
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
+        // 安装音频 tap（仅送入识别器；捕获局部 request 常量，不经 self 跨线程读属性）
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            request.append(buffer)
         }
 
         // 启动最大时长兜底
@@ -108,45 +105,31 @@ final class SpeechRecognitionService: SpeechRecognitionProtocol, @unchecked Send
             _ = await self?.stopListening()
         }
 
-        // 启动识别任务
+        // 启动识别任务。回调在系统私有队列触发：回调线程只取局部不可变值，
+        // 状态读写整体 hop 到 MainActor，消除与 stopListening 的数据竞争。
         recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                let text = result.bestTranscription.formattedString
-                print("[Speech] partial result: \"\(text)\", isFinal: \(result.isFinal)")
-
-                // 忽略空结果（endAudio() 后系统可能返回空的 isFinal）
-                if text.isEmpty {
-                    return
+            let text = result.map { $0.bestTranscription.formattedString }
+            let isFinal = result?.isFinal ?? false
+            let callbackError = error
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let text {
+                    print("[Speech] partial result: \"\(text)\", isFinal: \(isFinal)")
+                    // 忽略空结果（endAudio() 后系统可能返回空的 isFinal）；已停止则忽略后续回调
+                    if !text.isEmpty, case .listening = self.state {
+                        self.finalText = self.segmentAccumulator.ingest(text)
+                        self.state = .listening(partialText: self.finalText)
+                        // 每次收到新结果，重置静默计时器
+                        self.resetSilenceTimer()
+                    }
                 }
-
-                // 检测片段重置：用户停顿后识别器可能只返回新片段，
-                // 表现为文本长度骤降且内容不是前一次结果的前缀。
-                if !self.lastPartialText.isEmpty
-                    && text.count <= self.lastPartialText.count / 2
-                    && !self.lastPartialText.hasPrefix(text) {
-                    self.confirmedText += self.lastPartialText
-                    print("[Speech] segment committed, confirmedText: \"\(self.confirmedText)\"")
-                }
-                self.lastPartialText = text
-                self.finalText = self.confirmedText + text
-
-                Task { @MainActor in
-                    // 已停止则忽略后续回调
-                    guard case .listening = self.state else { return }
-                    self.state = .listening(partialText: self.finalText)
-                    // 每次收到新结果，重置静默计时器
-                    self.resetSilenceTimer()
-                }
-            }
-            if let error {
-                print("[Speech] recognitionTask error: \(error), code: \((error as NSError).code)")
-                Task { @MainActor in
+                if let callbackError {
+                    print("[Speech] recognitionTask error: \(callbackError), code: \((callbackError as NSError).code)")
                     self.silenceTimer?.cancel()
                     // 取消 / 无语音 不算错误
-                    let code = (error as NSError).code
+                    let code = (callbackError as NSError).code
                     if code != 216 && code != 1110 {
-                        self.state = .error(error.localizedDescription)
+                        self.state = .error(callbackError.localizedDescription)
                     } else {
                         self.stopAudioEngine()
                     }

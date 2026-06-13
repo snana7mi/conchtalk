@@ -47,7 +47,7 @@ actor SyncChangeCollector {
                         lastConnectedAt: captured.lastConnectedAt, permissionLevelRaw: captured.permissionLevelRaw,
                         expirationDate: captured.expirationDate, createdAt: captured.createdAt, syncVersion: captured.syncVersion,
                         modifiedAt: captured.modifiedAt, isDeleted: captured.isDeleted, isRemoteMerge: captured.isRemoteMerge,
-                        groupID: captured.groupID, password: try? keychainService.getPassword(forServer: captured.id)
+                        groupID: captured.groupID, password: try keychainService.getPassword(forServer: captured.id)
                     )
                 }
                 return SyncChangeEntry(entityType: .server, entityId: captured.id.uuidString,
@@ -72,7 +72,7 @@ actor SyncChangeCollector {
             all.append((syncVersion: k.syncVersion, build: { [keychainService] in
                 var keyWithPrivate = captured
                 // 软删除的 tombstone 不上传私钥
-                let privateData = captured.isDeleted ? nil : (try? keychainService.getSSHKey(withID: captured.id.uuidString))
+                let privateData = captured.isDeleted ? nil : try keychainService.getSSHKey(withID: captured.id.uuidString)
                 if privateData != nil {
                     keyWithPrivate = SwiftDataStore.SyncableSSHKey(
                         id: captured.id, label: captured.label, keyTypeRaw: captured.keyTypeRaw, fingerprint: captured.fingerprint,
@@ -134,9 +134,19 @@ actor SyncChangeCollector {
         var results: [SyncChangeEntry] = []
         var maxVersion = syncVersion
         for item in selected {
-            let entry = try item.build()
-            results.append(entry)
-            maxVersion = max(maxVersion, entry.syncVersion)
+            do {
+                let entry = try item.build()
+                results.append(entry)
+                maxVersion = max(maxVersion, entry.syncVersion)
+            } catch let error as KeychainError {
+                // 凭据读取失败（典型：锁屏 errSecInteractionNotAllowed）：截断本批次。
+                // push 水位线（lastSyncedVersion）是全局单调游标，若跳过失败实体继续推后续条目，
+                // 水位线将越过失败实体使其永久失去重推机会——截断保证水位线绝不越过任何未成功推送的实体。
+                // 收敛性：下一轮排序后第一条就是失败实体，build 即抛 → entries 为空 → push 段 break，
+                // 水位线不被污染；解锁后凭据可读，自然续推。
+                print("[SyncChangeCollector] 凭据读取失败，截断本批次: \(error)")
+                break
+            }
         }
 
         return (results, maxVersion)

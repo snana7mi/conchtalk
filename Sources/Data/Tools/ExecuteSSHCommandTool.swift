@@ -103,6 +103,24 @@ nonisolated struct ExecuteSSHCommandTool: ToolProtocol, @unchecked Sendable {
         return false
     }
 
+    /// 检测白名单命令链中会产生持久化写入或注入的结构：
+    /// 输出重定向（> / >>，含 1> 2>> 等 fd 前缀形态）、heredoc/herestring（<< / <<<）、tee。
+    /// 命中任一即需用户确认，且不受 AI 自报的 is_destructive 影响（只升不降）。
+    /// 前提：仅在 allSegmentsSafe == true 时调用。splitRawSegments 已按 & 分段，
+    /// 2>&1 / >&2 等纯 fd 复制形态在白名单判定阶段即已失配（needsConfirmation），
+    /// 故此处残留的任意 > 必为对真实文件的重定向，无需 /dev/null 或 fd 复制豁免。
+    private static func containsWriteOrInjection(_ cmd: String) -> Bool {
+        // heredoc / herestring（<< 与 <<<）
+        if cmd.contains("<<") { return true }
+        // 任意输出重定向（fd 复制形态已被 & 分段排除，见前提说明）
+        if cmd.contains(">") { return true }
+        // tee 写文件（防御冗余：管道分段下 tee 段首词通常已非白名单）
+        if let regex = try? Regex(#"(^|[\s;|&])tee(\s|$)"#), cmd.contains(regex) {
+            return true
+        }
+        return false
+    }
+
     /// 评估命令风险级别并决定是否需要确认。
     /// - Parameter arguments: 工具入参，至少包含 `command` 与 `is_destructive`。
     /// - Returns: 命令安全级别（safe / needsConfirmation / forbidden）。
@@ -129,8 +147,9 @@ nonisolated struct ExecuteSSHCommandTool: ToolProtocol, @unchecked Sendable {
         }
 
         if allSegmentsSafe {
-            // 包含重定向到系统路径或 -exec 模式 -> 不信任 is_destructive，强制确认
-            if Self.containsDangerousPattern(cmd) {
+            // 系统路径重定向 / -exec / 命令替换（现有），以及任意写重定向 /
+            // heredoc / tee（新增）-> 一律确认，不信任 is_destructive
+            if Self.containsDangerousPattern(cmd) || Self.containsWriteOrInjection(cmd) {
                 return .needsConfirmation
             }
             if !isDestructive {

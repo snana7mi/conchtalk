@@ -15,6 +15,8 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
     struct CallRecord: Sendable {
         let method: String
         let message: String?
+        /// 该次流式请求携带的会话历史（验证循环内压缩是否生效）。
+        var history: [Message]? = nil
     }
 
     private(set) var callHistory: [CallRecord] = []
@@ -44,7 +46,7 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
         serverName: String,
         serverCapabilities: ServerCapabilities
     ) -> AsyncStream<StreamingDelta> {
-        recordCall(CallRecord(method: "sendMessageStreaming", message: message))
+        recordCall(CallRecord(method: "sendMessageStreaming", message: message, history: conversationHistory))
         return makeStream()
     }
 
@@ -58,7 +60,7 @@ final class MockAIService: AIServiceProtocol, @unchecked Sendable {
         serverName: String,
         serverCapabilities: ServerCapabilities
     ) -> AsyncStream<StreamingDelta> {
-        recordCall(CallRecord(method: "sendToolResultStreaming", message: result))
+        recordCall(CallRecord(method: "sendToolResultStreaming", message: result, history: conversationHistory))
         return makeStream()
     }
 

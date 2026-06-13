@@ -23,6 +23,21 @@ actor ACPClientConnection {
     private let transport: ACPTransport
     private let requestTimeoutSeconds: TimeInterval
 
+    /// RequestTimeoutPolicy：请求超时策略。
+    private enum RequestTimeoutPolicy {
+        /// 固定超时：从发出请求计时（initialize / session/new / set_config 等短请求）。
+        case fixed(TimeInterval)
+        /// 空闲超时：收到任意入站消息即续期（session/prompt 长 turn）。
+        case idle(TimeInterval)
+    }
+
+    /// prompt 专用空闲超时（秒）：连续无任何入站消息超过该时长判定挂死。
+    /// 正常 turn 中代理至少有流式 update / 工具请求进来，不会触发。
+    private let promptIdleTimeoutSeconds: TimeInterval
+
+    /// 最近一次入站消息时间（response / notification / request 任意消息都刷新）。
+    private var lastInboundActivity: ContinuousClock.Instant = .now
+
     private var nextRequestId: Int = 1
     private var pendingRequests: [String: CheckedContinuation<AnyCodable?, Error>] = [:]
     private var messageRouterTask: Task<Void, Never>?
@@ -44,9 +59,14 @@ actor ACPClientConnection {
         permissionRequestHandler = handler
     }
 
-    init(transport: ACPTransport, requestTimeoutSeconds: TimeInterval = 120) {
+    init(
+        transport: ACPTransport,
+        requestTimeoutSeconds: TimeInterval = 120,
+        promptIdleTimeoutSeconds: TimeInterval = 300
+    ) {
         self.transport = transport
         self.requestTimeoutSeconds = requestTimeoutSeconds
+        self.promptIdleTimeoutSeconds = promptIdleTimeoutSeconds
     }
 
     // MARK: - 生命周期
@@ -110,7 +130,11 @@ actor ACPClientConnection {
             sessionId: sessionId,
             prompt: [.text(TextContent(text: text))]
         )
-        guard let resultValue = try await sendRequest(method: "session/prompt", params: params) else {
+        guard let resultValue = try await sendRequest(
+            method: "session/prompt",
+            params: params,
+            timeoutPolicy: .idle(promptIdleTimeoutSeconds)
+        ) else {
             throw ACPConnectionError.protocolError("session/prompt returned nil result")
         }
         let data = try JSONEncoder().encode(resultValue)
@@ -175,6 +199,7 @@ actor ACPClientConnection {
 
     /// 路由单条消息到对应处理器。
     private func routeMessage(_ message: ACPMessage) {
+        lastInboundActivity = .now
         #if DEBUG
         switch message {
         case .response(let resp):
@@ -301,19 +326,7 @@ actor ACPClientConnection {
         Task {
             switch method {
             case "session/request_permission":
-                guard let params else {
-                    try? await sendResponse(id: id, result: AnyCodable(false))
-                    return
-                }
-                do {
-                    let data = try JSONEncoder().encode(params)
-                    let request = try JSONDecoder().decode(ACPPermissionRequest.self, from: data)
-                    let approved = await permissionRequestHandler?(request) ?? false
-                    try? await sendResponse(id: id, result: AnyCodable(approved))
-                } catch {
-                    print("[ACPClientConnection] Failed to decode permission request: \(error)")
-                    try? await sendResponse(id: id, result: AnyCodable(false))
-                }
+                await handlePermissionRequest(id: id, params: params)
             default:
                 let errorResponse = ACPMessage.response(JSONRPCResponse(
                     id: id,
@@ -323,6 +336,68 @@ actor ACPClientConnection {
                 try? await transport.send(errorResponse)
             }
         }
+    }
+
+    /// 处理 session/request_permission：规范解码优先，失败回退旧自定义结构
+    /// （与 decodeFallbackUpdate 的兼容风格一致）。
+    private func handlePermissionRequest(id: ACPModel.RequestId, params: AnyCodable?) async {
+        guard let params, let data = try? JSONEncoder().encode(params) else {
+            await respondPermission(id: id, outcome: PermissionOutcome(cancelled: true))
+            return
+        }
+
+        // 1. 规范解码优先（ACP 规范参数：{sessionId, toolCall, options}）
+        if let request = try? JSONDecoder().decode(RequestPermissionRequest.self, from: data) {
+            let bridged = ACPPermissionRequest(
+                description: request.toolCall.title ?? request.toolCall.toolCallId,
+                tool: request.toolCall.kind?.rawValue,
+                options: request.options.map {
+                    AgentPermissionOption(optionId: $0.optionId, name: $0.name, kind: $0.kind)
+                }
+            )
+            guard let handler = permissionRequestHandler else {
+                // 无 handler：按规范回 cancelled，而非裸 false
+                await respondPermission(id: id, outcome: PermissionOutcome(cancelled: true))
+                return
+            }
+            let approved = await handler(bridged)
+            await respondPermission(
+                id: id, outcome: Self.selectOutcome(approved: approved, options: request.options))
+            return
+        }
+
+        // 2. 旧自定义结构 fallback（{description, tool, arguments}；响应保持旧裸布尔，兼容非标代理）
+        if let legacy = try? JSONDecoder().decode(LegacyPermissionRequestPayload.self, from: data) {
+            let bridged = ACPPermissionRequest(
+                description: legacy.description, tool: legacy.tool, options: [])
+            let approved = await permissionRequestHandler?(bridged) ?? false
+            try? await sendResponse(id: id, result: AnyCodable(approved))
+            return
+        }
+
+        // 3. 两种结构都解不开：统一回 cancelled
+        print("[ACPClientConnection] Failed to decode permission request")
+        await respondPermission(id: id, outcome: PermissionOutcome(cancelled: true))
+    }
+
+    /// 发送规范 outcome 响应。
+    private func respondPermission(id: ACPModel.RequestId, outcome: PermissionOutcome) async {
+        let response = RequestPermissionResponse(outcome: outcome)
+        try? await sendResponse(id: id, result: try? encodeToAnyCodable(response))
+    }
+
+    /// Bool 决策 → 规范 optionId：approve 优先选 kind == allow_once，deny 优先 reject_once；
+    /// 无精确匹配时取首个 allow* / reject* 前缀；options 为空回 cancelled。
+    nonisolated static func selectOutcome(approved: Bool, options: [PermissionOption]) -> PermissionOutcome {
+        let preferredKind = approved ? "allow_once" : "reject_once"
+        let prefix = approved ? "allow" : "reject"
+        if let exact = options.first(where: { $0.kind == preferredKind }) {
+            return PermissionOutcome(optionId: exact.optionId)
+        }
+        if let prefixed = options.first(where: { $0.kind.hasPrefix(prefix) }) {
+            return PermissionOutcome(optionId: prefixed.optionId)
+        }
+        return PermissionOutcome(cancelled: true)
     }
 
     /// transport 错误时取消所有等待中的请求。
@@ -346,8 +421,12 @@ actor ACPClientConnection {
         pendingRequests.removeAll()
     }
 
-    /// 发送请求并等待响应，带超时。
-    private func sendRequest<P: Encodable>(method: String, params: P) async throws -> AnyCodable? {
+    /// 发送请求并等待响应，带超时（默认固定超时；session/prompt 传入空闲超时策略）。
+    private func sendRequest<P: Encodable>(
+        method: String,
+        params: P,
+        timeoutPolicy: RequestTimeoutPolicy? = nil
+    ) async throws -> AnyCodable? {
         #if DEBUG
         print("[ACP:Send] method=\(method), pendingCount=\(pendingRequests.count)")
         #endif
@@ -357,14 +436,11 @@ actor ACPClientConnection {
 
         let paramsValue = try encodeToAnyCodable(params)
         let message = ACPMessage.request(JSONRPCRequest(id: id, method: method, params: paramsValue))
+        let policy = timeoutPolicy ?? .fixed(requestTimeoutSeconds)
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AnyCodable?, Error>) in
             self.pendingRequests[key] = continuation
-
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(self?.requestTimeoutSeconds ?? 120))
-                await self?.timeoutRequest(key: key)
-            }
+            self.startTimeoutGuard(key: key, policy: policy)
 
             Task { [weak self] in
                 do {
@@ -374,6 +450,45 @@ actor ACPClientConnection {
                 }
             }
         }
+    }
+
+    /// 按策略启动超时守卫。
+    /// - fixed：一次性 sleep 后超时（原有行为）。
+    /// - idle：轮询检查最近入站活动；发起时先刷新活动基线，避免连接静置后立即误判。
+    private func startTimeoutGuard(key: String, policy: RequestTimeoutPolicy) {
+        switch policy {
+        case .fixed(let seconds):
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(seconds))
+                await self?.timeoutRequest(key: key)
+            }
+        case .idle(let idleLimit):
+            // 发出请求即视为活跃起点（请求本身是出站，但作为 idle 计时基线）
+            lastInboundActivity = .now
+            Task { [weak self] in
+                while true {
+                    try? await Task.sleep(for: .seconds(min(idleLimit, 10)))
+                    guard let self else { return }
+                    guard await self.isPending(key: key) else { return }  // 已 resolve，守卫退出
+                    if await self.idleElapsedSeconds() >= idleLimit {
+                        await self.timeoutRequest(key: key)  // 复用既有 one-shot resume
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    /// 查询请求是否仍在等待响应。
+    private func isPending(key: String) -> Bool {
+        pendingRequests[key] != nil
+    }
+
+    /// 距最近一次入站消息的秒数。
+    private func idleElapsedSeconds() -> TimeInterval {
+        let elapsed = ContinuousClock.Instant.now - lastInboundActivity
+        return TimeInterval(elapsed.components.seconds)
+            + TimeInterval(elapsed.components.attoseconds) / 1e18
     }
 
     /// 超时取消指定请求。
@@ -403,8 +518,25 @@ actor ACPClientConnection {
     }
 }
 
-/// ACPPermissionRequest：代理发送的权限请求（ACPModel 未定义独立类型，保留自定义）。
-nonisolated struct ACPPermissionRequest: Codable, Sendable {
+/// AgentPermissionOption：ACP 代理提供的审批选项摘要。
+nonisolated struct AgentPermissionOption: Sendable {
+    let optionId: String
+    let name: String
+    /// allow_once / allow_always / reject_once / reject_always
+    let kind: String
+}
+
+/// ACPPermissionRequest：统一的权限请求桥接类型（纯桥接，不承担 Codable 职责）。
+/// ACP 路径携带代理提供的审批选项；Claude Code 路径 options 为空。
+nonisolated struct ACPPermissionRequest: Sendable {
+    let description: String
+    let tool: String?
+    let options: [AgentPermissionOption]
+}
+
+/// LegacyPermissionRequestPayload：旧自定义线格式 {description, tool, arguments} 的解码壳，
+/// 仅用于兼容非标代理的 fallback 解码路径。
+private nonisolated struct LegacyPermissionRequestPayload: Codable, Sendable {
     let description: String
     let tool: String?
     let arguments: AnyCodable?

@@ -32,7 +32,7 @@ Paid users can sync all local data (servers, messages, SSH keys, memories, syste
 - **Disabling sync immediately deletes all cloud data** — privacy-first design, local data is unaffected
 - **E2E encryption**: AES-256-GCM with HKDF per-entity-type key derivation; server never sees plaintext
 - **Automatic sync** triggers when the app enters background
-- **Incremental push/pull** with composite cursor pagination; cross-entity-type global version ordering
+- **Incremental push/pull** with server-side seq cursor (`seq` query param) pagination; cross-entity-type global version ordering
 - **Last-Write-Wins (LWW)** conflict resolution based on `modifiedAt` timestamps
 - **Soft delete** with 30-day retention before physical cleanup
 - **Storage limit**: 100 MB per user with automatic oldest-message pruning
@@ -47,7 +47,7 @@ ConchTalk currently supports three ways to work:
 2. **Custom API**  
    You can configure your own endpoint, API key, and model. OpenAI-compatible and Anthropic-style APIs are supported.
 3. **Direct agent mode**  
-   If a compatible agent is already available on the remote server, ConchTalk can connect to it directly over SSH — no daemon or relay service is installed on your server.
+   If a compatible agent is already available on the remote server, ConchTalk can connect to it directly over SSH — no daemon or relay service is installed on your server. When an agent requests tool approval via `session/request_permission` (ACP) or `control_request` (Claude Code), the app shows a permission dialog and responds with the ACP-compliant `outcome`/`optionId` (auto-denied after 300 seconds with no action).
 
 The current codebase includes built-in support or detection for agents such as:
 
@@ -62,7 +62,7 @@ ConchTalk detects which agents are already installed on the server, so the list 
 - Execute AI-planned multi-step tasks with tool calls
 - Dispatch parallel subagents for specialized, context-isolated subtasks
 - Read, write, edit, search, and upload files on remote systems
-- Fetch web content through the remote machine's network
+- Fetch web content through the remote machine's network (public targets only — non-public addresses are refused to prevent SSRF)
 - Keep long-running work alive with Live Activity-powered background execution (iOS) and native background task fallback
 - Suggest switching into direct agent mode when a better remote agent is available
 - Persist server metadata, chat history, and memory for follow-up tasks
@@ -120,6 +120,11 @@ Permission modes:
 - `standard`: read allowed, writes confirmed, dangerous actions blocked
 - `permissive`: read/write allowed automatically, dangerous actions still gated
 
+Hardening rules applied on top of safety levels:
+
+- `execute_ssh_command`: any write redirection (`>`, `>>`), heredoc/herestring (`<<`), or `tee` in a whitelisted command chain always requires confirmation — the AI-reported `is_destructive` flag can only raise risk, never lower it
+- `web_fetch`: refuses to fetch non-public addresses (loopback, private ranges, link-local/cloud metadata, CGNAT, IPv6 loopback/ULA) before any remote command runs
+
 This keeps the assistant useful without removing user control.
 
 ## Architecture Overview
@@ -157,7 +162,7 @@ Key runtime paths:
 - **Tool execution path**: tool calls are checked by `ToolSafetyGate` and executed through `StreamingToolExecutor` when streaming is supported
 - **SSH execution**: remote commands run through isolated exec channels rather than a shared persistent shell state
 - **Background task management**: `TaskExecutionCoordinator` orchestrates task queuing, execution, approval continuations, and post-processing; `PerServerTaskQueue` manages per-server FIFO queues; `LiveActivityManager` starts a Live Activity to extend background runtime and surface task status on the Lock Screen and Dynamic Island; a native 30-second background task acts as fallback
-- **Direct agent mode**: `DirectAgentSession` routes connections to Claude Code, Codex, or ACP-based agents depending on agent type
+- **Direct agent mode**: `DirectAgentSession` routes connections to Claude Code, Codex, or ACP-based agents depending on agent type; tool permission requests from the agent surface a user approval dialog with ACP-compliant responses
 
 ## Platform and Tech Stack
 

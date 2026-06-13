@@ -20,15 +20,24 @@ final class MockKeychainService: KeychainServiceProtocol, @unchecked Sendable {
 
     var shouldThrow: Error?
 
+    // 按 ID 定点注入：仅命中指定实体时抛错，其余正常。
+    // 用于「第 N 个实体读取/写入失败」类用例（全方法注入 shouldThrow 无法表达）。
+    var passwordReadErrors: [UUID: Error] = [:]
+    var passwordWriteErrors: [UUID: Error] = [:]
+    var sshKeyReadErrors: [String: Error] = [:]
+    var sshKeyWriteErrors: [String: Error] = [:]
+
     // MARK: - Password
 
     func savePassword(_ password: String, forServer serverID: UUID) throws {
         if let error = shouldThrow { throw error }
+        if let error = passwordWriteErrors[serverID] { throw error }
         passwords[serverID] = password
     }
 
     func getPassword(forServer serverID: UUID) throws -> String? {
         if let error = shouldThrow { throw error }
+        if let error = passwordReadErrors[serverID] { throw error }
         return passwords[serverID]
     }
 
@@ -41,11 +50,13 @@ final class MockKeychainService: KeychainServiceProtocol, @unchecked Sendable {
 
     func saveSSHKey(_ keyData: Data, withID keyID: String) throws {
         if let error = shouldThrow { throw error }
+        if let error = sshKeyWriteErrors[keyID] { throw error }
         sshKeys[keyID] = keyData
     }
 
     func getSSHKey(withID keyID: String) throws -> Data? {
         if let error = shouldThrow { throw error }
+        if let error = sshKeyReadErrors[keyID] { throw error }
         return sshKeys[keyID]
     }
 
@@ -153,5 +164,9 @@ final class MockKeychainService: KeychainServiceProtocol, @unchecked Sendable {
         storedRefreshToken = nil
         storedTokenExpiry = nil
         shouldThrow = nil
+        passwordReadErrors = [:]
+        passwordWriteErrors = [:]
+        sshKeyReadErrors = [:]
+        sshKeyWriteErrors = [:]
     }
 }

@@ -56,6 +56,37 @@ struct SwiftDataStoreTests {
         #expect(messages.count == 1)
     }
 
+    @Test("deleteMessage 软删除单条消息并 bump 同步字段")
+    func deleteMessageSoftDeletesAndBumpsSyncFields() async throws {
+        let (store, _) = try makeInMemoryStore()
+        let serverID = UUID()
+        let message = TestFixtures.makeMessage(content: "to recall")
+
+        try await store.addMessage(message, toServer: serverID)
+        let changedAfterInsert = try await store.fetchChangedMessages(since: 0, limit: 10)
+        let insertVersion = try #require(
+            changedAfterInsert.first(where: { $0.id == message.id })?.syncVersion
+        )
+
+        try await store.deleteMessage(message.id)
+
+        // UI 查询不再返回（软删除对 fetch 隐藏）
+        let visible = try await store.fetchMessages(forServer: serverID)
+        #expect(!visible.contains(where: { $0.id == message.id }))
+
+        // tombstone 仍可被同步收集：isDeleted == true、syncVersion 递增、isRemoteMerge == false
+        let changedAfterDelete = try await store.fetchChangedMessages(since: 0, limit: 10)
+        let tombstone = try #require(
+            changedAfterDelete.first(where: { $0.id == message.id })
+        )
+        #expect(tombstone.isDeleted == true)
+        #expect(tombstone.syncVersion > insertVersion)
+        #expect(tombstone.isRemoteMerge == false)
+
+        // 幂等：重复删除不抛错
+        try await store.deleteMessage(message.id)
+    }
+
     @Test("upsertSystemProfile 会更新同 serverID 的已存在记录")
     func upsertSystemProfileUpdatesExistingRecord() async throws {
         let (store, _) = try makeInMemoryStore()

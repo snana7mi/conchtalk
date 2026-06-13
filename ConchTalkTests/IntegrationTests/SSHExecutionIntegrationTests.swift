@@ -138,4 +138,69 @@ struct SSHExecutionIntegrationTests {
         let output = try await client.execute(command: "printf '\\033[31mred\\033[0m'")
         #expect(!output.isEmpty)
     }
+
+    // MARK: - 超时行为（问题 4）
+
+    /// 超时命令在 timeout + 宽限期 + 余量内抛 SSHError.timeout，调用方不被无限阻塞。
+    @Test
+    func executeTimeoutReturnsWithinBound() async throws {
+        let config = try #require(IntegrationTestConfig.load())
+        let client = try await config.connectSSH()
+        defer { Task { await client.disconnect() } }
+
+        let start = ContinuousClock.now
+        do {
+            _ = try await client.execute(command: "sleep 100", timeout: 3)
+            Issue.record("Expected SSHError.timeout but command succeeded")
+        } catch let error as SSHError {
+            guard case .timeout = error else {
+                Issue.record("Expected SSHError.timeout but got \(error)")
+                return
+            }
+        }
+        // timeout(3s) + 宽限(5s) + 余量(2s) = 10s 上界
+        #expect(ContinuousClock.now - start < .seconds(10))
+    }
+
+    /// 输出持续流动的命令超时后及时返回（checkCancellation 生效），且连接保持可用（watchdog 未触发）。
+    @Test
+    func executeTimeoutWithFlowingOutputCancelsPromptly() async throws {
+        let config = try #require(IntegrationTestConfig.load())
+        let client = try await config.connectSSH()
+        defer { Task { await client.disconnect() } }
+
+        let start = ContinuousClock.now
+        do {
+            _ = try await client.execute(
+                command: "while true; do echo x; sleep 0.1; done", timeout: 2)
+            Issue.record("Expected SSHError.timeout but command succeeded")
+        } catch let error as SSHError {
+            guard case .timeout = error else {
+                Issue.record("Expected SSHError.timeout but got \(error)")
+                return
+            }
+        }
+        // 可取消路径应在宽限期内退出（取 2s timeout + 5s 宽限的上界再放余量）
+        #expect(ContinuousClock.now - start < .seconds(9))
+
+        // 连接保持可用：watchdog 不应触发强断
+        let followUp = try await client.execute(command: "echo ok")
+        #expect(followUp.contains("ok"))
+        let stillConnected = await client.isConnected
+        #expect(stillConnected)
+    }
+
+    /// 超时后连接整体仍可继续执行后续命令（回归：宽限 watchdog 不误关健康连接）。
+    @Test
+    func executeAfterTimeoutConnectionSurvives() async throws {
+        let config = try #require(IntegrationTestConfig.load())
+        let client = try await config.connectSSH()
+        defer { Task { await client.disconnect() } }
+
+        _ = try? await client.execute(command: "sleep 30", timeout: 2)
+        // 等待越过宽限期，确认 watchdog 对「可取消的正常超时」不触发
+        try await Task.sleep(for: .seconds(6))
+        let output = try await client.execute(command: "echo survived")
+        #expect(output.contains("survived"))
+    }
 }

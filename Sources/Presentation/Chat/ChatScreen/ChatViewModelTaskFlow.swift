@@ -60,8 +60,13 @@ extension ChatViewModel {
         // AI 任务需要完整对话历史，分页模式下先加载全部
         let capturedAttachments = pendingAttachments
         let userMsgID = userMsg.id
+        // 与 markAsQueued 同一 MainActor turn 内登记「等待入队」，
+        // 防止兜底自愈在入队完成前误摘排队标记（→ 撤回拦截误判 → 消息静默丢失）
+        pendingEnqueueMessageIDs.insert(userMsgID)
         deferredEnqueueTask = Task { [weak self] in
             guard let self else { return }
+            // 所有退出路径（取消/加载失败/撤回拦截/入队完成）统一注销等待标记
+            defer { self.pendingEnqueueMessageIDs.remove(userMsgID) }
             let loaded = await self.ensureFullHistoryLoaded()
             guard !Task.isCancelled else { return }
             guard loaded else {
@@ -78,7 +83,14 @@ extension ChatViewModel {
                 self.deferredEnqueueTask = nil
                 return
             }
+            // 排队消息在 enqueue 前已被撤回 → 不再入队（堵住「撤回早于入队」的窗口）。
+            // 条件必须带 isQueuing：非排队的首发消息从不进入 queuedMessageIDs，不能被误拦。
+            if isQueuing && !self.queuedMessageIDs.contains(userMsgID) {
+                self.deferredEnqueueTask = nil
+                return
+            }
             self.taskCoordinator.enqueueTask(
+                taskID: userMsgID,
                 serverID: self.serverID,
                 text: messageContent,
                 server: self.server,
@@ -88,14 +100,16 @@ extension ChatViewModel {
             self.deferredEnqueueTask = nil
         }
 
-        // 持久化用户消息
-        Task { [store, sid = serverID] in
+        // 持久化用户消息（句柄入表，撤回时可等待写入完成后再删除）
+        let persistTask = Task { [weak self, store, sid = serverID] in
             do {
                 try await store.addMessage(userMsg, toServer: sid)
             } catch {
                 print("[ChatVM] Failed to persist user message: \(error)")
             }
+            self?.messagePersistTasks.removeValue(forKey: userMsgID)
         }
+        messagePersistTasks[userMsgID] = persistTask
 
         if !isQueuing {
             // 注册 observer 以接收实时状态推送
@@ -116,6 +130,11 @@ extension ChatViewModel {
             self.isStreaming = state.isStreaming
             self.isReasoningActive = state.isReasoningActive
             self.isContextCompressing = state.isContextCompressing
+
+            // 任务被 dequeue 开始执行 → 即时摘除排队标记（幂等，Set.remove）
+            if let executingID = state.currentTaskID {
+                self.markAsExecuting(executingID)
+            }
 
             // 中间消息实时追加（通过 ID 去重，确保每条消息只追加一次）
             if let intermediateMsg = state.latestIntermediateMessage,
@@ -164,6 +183,16 @@ extension ChatViewModel {
             if !state.isStreaming && !self.taskCoordinator.hasActiveTask(for: self.serverID) {
                 Task { [weak self] in
                     await self?.syncAfterTaskCompletion()
+                    guard let self else { return }
+                    // cleanupTask 的 removeState 会连 observer 一并移除。
+                    // 若还有后续任务（运行中 / 排队 / 等待入队），需要重挂 observer，
+                    // 否则 drained 任务执行期间 UI 收不到推送、完成后也无人触发兜底同步。
+                    // 本分支只在完成推送到达 observer（用户在页面）时进入，离页后不会误挂。
+                    if self.taskCoordinator.hasActiveTask(for: self.serverID)
+                        || !self.taskCoordinator.taskQueue.isEmpty(for: self.serverID)
+                        || !self.pendingEnqueueMessageIDs.isEmpty {
+                        self.attachObserver()
+                    }
                 }
             }
         }
@@ -189,6 +218,14 @@ extension ChatViewModel {
         isProcessing = false
         clearTransientStreamingState()
         pendingAttachments.removeAll()
+
+        // 2. 兜底自愈：排队标记与「coordinator 队列 ∪ 等待入队集合」求交集，
+        //    修剪错过 currentTaskID 推送的残留标记（本方法只经 observer 回调触发；
+        //    observer 不在线的残留由 loadMessages 的重进自愈兜底）。
+        //    等待入队中的消息尚未进入 coordinator 队列，但并非用户撤回，
+        //    绝不能在此被摘——否则入队前拦截会误判撤回、静默丢消息。
+        let stillQueuedIDs = Set(taskCoordinator.taskQueue.tasks(for: serverID).map(\.id))
+        queuedMessageIDs.formIntersection(stillQueuedIDs.union(pendingEnqueueMessageIDs))
     }
 
     /// 同意当前待审批工具调用。

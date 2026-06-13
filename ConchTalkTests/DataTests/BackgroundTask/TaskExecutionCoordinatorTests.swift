@@ -319,6 +319,132 @@ struct TaskExecutionCoordinatorTests {
         #expect(receivedState?.isStreaming == true)
     }
 
+    // MARK: - TaskID 贯通 Tests（撤回排队消息修复）
+
+    @Test("enqueueTask 显式 taskID 贯通到 QueuedTask.id")
+    func enqueueTask_withExplicitTaskID_queuedTaskUsesIt() async throws {
+        let aiService = MockAIService()
+        // 首任务用 suggest_agent_connection 挂起等待用户选择，保证第二条停留在队列中
+        aiService.streamingResponses = [[
+            .toolCall(makeSuggestAgentToolCall()),
+            .done,
+        ]]
+
+        let (coordinator, sshManager, _) = try makeCoordinator(aiService: aiService)
+        let server = TestFixtures.makeServer(id: UUID())
+        sshManager.registerClientForTesting(serverID: server.id, client: NIOSSHClient())
+        coordinator.setObserver(for: server.id, emitCurrent: false) { _ in }
+
+        // 首任务启动并挂起在代理连接等待
+        coordinator.enqueueTask(serverID: server.id, text: "first", server: server, messages: [])
+        try await waitUntil {
+            coordinator.stateStore.state(for: server.id)?.pendingAgentConnection == true
+        }
+
+        // 第二条显式传 taskID（模拟用户消息 ID）
+        let messageID = UUID()
+        coordinator.enqueueTask(taskID: messageID, serverID: server.id, text: "second", server: server, messages: [])
+
+        let queuedTasks = coordinator.taskQueue.tasks(for: server.id)
+        #expect(queuedTasks.count == 1)
+        #expect(queuedTasks.first?.id == messageID)
+
+        // 清理：取消首任务，等待队列排空（drain 会启动第二条并以默认 .done 快速结束）
+        coordinator.cancelTask(for: server.id)
+        try await waitUntil(timeoutSeconds: 5) {
+            !coordinator.hasActiveTask(for: server.id) && coordinator.taskQueue.isEmpty(for: server.id)
+        }
+    }
+
+    @Test("cancelQueuedTask 按消息 ID 移除排队任务且该任务不再执行")
+    func cancelQueuedTask_withMessageID_removesQueuedTask_taskNeverExecutes() async throws {
+        let aiService = MockAIService()
+        aiService.streamingResponses = [[
+            .toolCall(makeSuggestAgentToolCall()),
+            .done,
+        ]]
+
+        let (coordinator, sshManager, _) = try makeCoordinator(aiService: aiService)
+        let server = TestFixtures.makeServer(id: UUID())
+        sshManager.registerClientForTesting(serverID: server.id, client: NIOSSHClient())
+        coordinator.setObserver(for: server.id, emitCurrent: false) { _ in }
+
+        coordinator.enqueueTask(serverID: server.id, text: "first", server: server, messages: [])
+        try await waitUntil {
+            coordinator.stateStore.state(for: server.id)?.pendingAgentConnection == true
+        }
+
+        let messageID = UUID()
+        coordinator.enqueueTask(taskID: messageID, serverID: server.id, text: "second", server: server, messages: [])
+        #expect(coordinator.taskQueue.count(for: server.id) == 1)
+
+        // 用消息 ID 撤回排队任务（修复前 QueuedTask.id 是内部新 UUID，永不匹配）
+        let removed = coordinator.cancelQueuedTask(serverID: server.id, taskID: messageID)
+        #expect(removed == true)
+        #expect(coordinator.taskQueue.isEmpty(for: server.id))
+
+        // 释放首任务
+        coordinator.cancelTask(for: server.id)
+        try await waitUntil(timeoutSeconds: 5) {
+            !coordinator.hasActiveTask(for: server.id)
+        }
+
+        // 被撤回的任务从未触发新的 AI 首轮调用（只有首任务一次）
+        #expect(aiService.callCount("sendMessageStreaming") == 1)
+    }
+
+    @Test("startTask 将 currentTaskID 写入流式状态")
+    func startTask_publishesCurrentTaskID_inStreamingState() async throws {
+        let aiService = MockAIService()
+        aiService.streamingResponses = [[
+            .toolCall(makeSuggestAgentToolCall()),
+            .done,
+        ]]
+
+        let (coordinator, sshManager, _) = try makeCoordinator(aiService: aiService)
+        let server = TestFixtures.makeServer(id: UUID())
+        sshManager.registerClientForTesting(serverID: server.id, client: NIOSSHClient())
+        coordinator.setObserver(for: server.id, emitCurrent: false) { _ in }
+
+        let messageID = UUID()
+        coordinator.enqueueTask(taskID: messageID, serverID: server.id, text: "task", server: server, messages: [])
+
+        // 任务启动并挂起在代理连接等待，此时状态仍在 stateStore 中可查
+        try await waitUntil {
+            coordinator.stateStore.state(for: server.id)?.pendingAgentConnection == true
+        }
+        #expect(coordinator.stateStore.state(for: server.id)?.currentTaskID == messageID)
+
+        coordinator.cancelTask(for: server.id)
+        try await waitUntil(timeoutSeconds: 5) {
+            !coordinator.hasActiveTask(for: server.id)
+        }
+    }
+
+    @Test("isExecutingTask 仅在该任务正在执行时为 true")
+    func isExecutingTask_matchesOnlyActiveCurrentTask() async throws {
+        let (coordinator, _, _) = try makeCoordinator()
+        let serverID = UUID()
+        let taskID = UUID()
+
+        // 无活跃任务 → false
+        #expect(!coordinator.isExecutingTask(taskID: taskID, serverID: serverID))
+
+        // 构造执行态：注册保活任务 + 写入 currentTaskID
+        let holdTask = Task<Void, Never> { try? await Task.sleep(for: .seconds(60)) }
+        coordinator.lifecycleManager.registerTaskForTesting(serverID: serverID, task: holdTask)
+        coordinator.stateStore.initState(
+            for: serverID,
+            state: TaskStreamingState(isStreaming: true, currentTaskID: taskID)
+        )
+
+        #expect(coordinator.isExecutingTask(taskID: taskID, serverID: serverID))
+        // 其他 taskID → false
+        #expect(!coordinator.isExecutingTask(taskID: UUID(), serverID: serverID))
+
+        holdTask.cancel()
+    }
+
     // MARK: - Cancel Tests
 
     @Test("cancelTask 取消后 hasActiveTask 变为 false")

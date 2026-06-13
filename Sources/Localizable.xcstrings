@@ -277,6 +277,22 @@
         }
       }
     },
+    "Agent Permission Request" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェント権限リクエスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理权限请求"
+          }
+        }
+      }
+    },
     "AI API" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -324,6 +340,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "AI 服务"
+          }
+        }
+      }
+    },
+    "Allow" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "許可"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许"
           }
         }
       }
@@ -1315,6 +1347,22 @@
     },
     "Delete Key" : {
 
+    },
+    "Deny" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒否"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒绝"
+          }
+        }
+      }
     },
     "DIRECT" : {
       "comment" : "The label for the direct mode badge.",

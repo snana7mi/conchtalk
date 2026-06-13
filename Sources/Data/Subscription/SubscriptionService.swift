@@ -6,14 +6,18 @@ private typealias GatewaySubscriptionService = LLMGatewayKit.SubscriptionService
 
 @Observable
 final class SubscriptionService: SubscriptionServiceProtocol {
-    private(set) var displayPrice: String?
-    private(set) var purchaseState: PurchaseState = .idle
+    /// 计算属性直接转发 gateway：购买全程的中间态（purchasing / verifying）实时驱动
+    /// Paywall 的进度展示与防重复点击。@Observable 依赖追踪登记在最终被读取的
+    /// gateway 存储属性上，gateway（@MainActor @Observable）每次赋值都会触发 View 重渲染。
+    var displayPrice: String? { gateway.displayPrice }
+    var purchaseState: PurchaseState { gateway.purchaseState.asConchTalkPurchaseState }
 
     static let entitlementID = "conchtalk Pro"
 
     private let gateway: GatewaySubscriptionService
 
-    init(authService: AuthServiceProtocol) {
+    /// - Parameter purchaseClient: 测试缝隙；nil 时 gateway 按 config 自建 LivePurchaseClient，生产行为不变。
+    init(authService: AuthServiceProtocol, purchaseClient: (any PurchaseClient)? = nil) {
         let concreteAuth = authService as? AuthService
         let config = LLMGatewayKitConfig(
             baseURL: URL(string: "https://api.conch-talk.com")!,
@@ -29,9 +33,9 @@ final class SubscriptionService: SubscriptionServiceProtocol {
             deviceName: "ConchTalk"
         )
         if let concreteAuth {
-            self.gateway = GatewaySubscriptionService(authService: concreteAuth.gatewayAuthService, config: config)
+            self.gateway = GatewaySubscriptionService(authService: concreteAuth.gatewayAuthService, config: config, purchaseClient: purchaseClient)
         } else {
-            self.gateway = GatewaySubscriptionService(authService: AuthService(keychainService: KeychainService()).gatewayAuthService, config: config)
+            self.gateway = GatewaySubscriptionService(authService: AuthService(keychainService: KeychainService()).gatewayAuthService, config: config, purchaseClient: purchaseClient)
         }
     }
 
@@ -41,22 +45,14 @@ final class SubscriptionService: SubscriptionServiceProtocol {
 
     func loadProducts() async {
         await gateway.loadProducts()
-        syncFromGateway()
     }
 
     func purchase() async {
         await gateway.purchase()
-        syncFromGateway()
     }
 
     func restore() async {
         await gateway.restore()
-        syncFromGateway()
-    }
-
-    private func syncFromGateway() {
-        displayPrice = gateway.displayPrice
-        purchaseState = gateway.purchaseState.asConchTalkPurchaseState
     }
 }
 

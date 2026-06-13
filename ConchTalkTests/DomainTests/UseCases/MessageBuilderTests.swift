@@ -100,4 +100,27 @@ struct MessageBuilderTests {
         #expect(result[0]["role"] as? String == "user")
         #expect((result[0]["content"] as? String)?.contains("found auth.swift") == true)
     }
+
+    @Test("aiContext 摘要消息透传 content 给 AI")
+    func aiContextSummaryPassesThroughToAI() {
+        let summary = "[Context compacted — earlier conversation summary]\nFAKE SUMMARY"
+        let messages = [TestFixtures.makeMessage(
+            role: .system, content: summary, systemMessageType: .aiContext
+        )]
+        let result = MessageBuilder.build(from: messages)
+        #expect(result.count == 1)
+        let content = result[0]["content"] as? String ?? ""
+        #expect(content.contains("FAKE SUMMARY"))
+        #expect(!content.contains("Connected to server"))
+    }
+
+    @Test("info 系统消息仍映射为 Connected to server（保护连接提示语义）")
+    func infoStillMapsToConnectedToServer() {
+        let messages = [TestFixtures.makeMessage(
+            role: .system, content: "Connected to MyServer (1.2.3.4)", systemMessageType: .info
+        )]
+        let result = MessageBuilder.build(from: messages)
+        let content = result[0]["content"] as? String ?? ""
+        #expect(content == "[System: Connected to server]")
+    }
 }

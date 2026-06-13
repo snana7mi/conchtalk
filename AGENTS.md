@@ -277,7 +277,7 @@ SyncService.sync()
 
 Pull 流程:
 SyncService.sync()
-  → SyncAPIClient.pull()                          [GET /sync/pull，复合游标]
+  → SyncAPIClient.pull()                          [GET /sync/pull，seq 游标]
   → SyncCryptoService.decrypt()
   → SyncMergeEngine.merge()
     → SwiftDataStore.mergeRemote*()               [LWW 合并，isRemoteMerge = true]

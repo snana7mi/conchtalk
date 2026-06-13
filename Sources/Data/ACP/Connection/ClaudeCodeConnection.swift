@@ -106,6 +106,10 @@ actor ClaudeCodeConnection: AgentConnection {
 
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void) {}
 
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) {
+        permissionRequestHandler = handler
+    }
+
     // MARK: - AgentConnection
 
     func connect(cwd: String) async throws -> AgentConnectionInfo {
@@ -331,7 +335,7 @@ actor ClaudeCodeConnection: AgentConnection {
         let permRequest = ACPPermissionRequest(
             description: description,
             tool: req.request.toolName,
-            arguments: nil
+            options: []  // Claude Code 是 allow/deny 二选协议，无 ACP options
         )
         let approved = await permissionRequestHandler?(permRequest) ?? false
 

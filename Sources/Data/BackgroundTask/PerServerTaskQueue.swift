@@ -54,13 +54,18 @@ final class PerServerTaskQueue {
         return task
     }
 
-    /// 取消指定服务器中指定 ID 的排队任务（若不存在则静默忽略）。
-    func cancel(serverID: UUID, taskID: UUID) {
+    /// 取消指定服务器中指定 ID 的排队任务。
+    /// - Returns: 是否真正移除了任务（false 表示该 ID 不在队列中）。
+    @discardableResult
+    func cancel(serverID: UUID, taskID: UUID) -> Bool {
+        let before = queues[serverID]?.count ?? 0
         queues[serverID]?.removeAll { $0.id == taskID }
+        let after = queues[serverID]?.count ?? 0
         // 清理空队列
         if queues[serverID]?.isEmpty == true {
             queues.removeValue(forKey: serverID)
         }
+        return after < before
     }
 
     /// 返回指定服务器的所有排队任务快照（按入队顺序）。

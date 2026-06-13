@@ -52,4 +52,6 @@ protocol AgentConnection: Actor, Sendable {
     func setDisconnectHandler(_ handler: @escaping @Sendable () -> Void)
     /// 设置 config 更新回调。
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void)
+    /// 设置权限请求回调（代理请求用户审批工具调用时触发）。
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool)
 }

@@ -256,10 +256,17 @@ struct DirectSessionCoordinatorTests {
         }
 
         await coordinator.connect(agent: agent, cwd: "/tmp/work")
-        await Task.yield()
 
         #expect(coordinator.state.lifecycle == .failed(message: "boom"))
 
+        // 单次 yield 不保证 collectTask 已消费到事件（调度敏感、并行负载下偶发失败），
+        // 改为有限轮询等待 error 事件出现。
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while ContinuousClock.now < deadline {
+            let hasError = events.contains { if case .error = $0 { return true }; return false }
+            if hasError { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         let hasError = events.contains { if case .error = $0 { return true }; return false }
         #expect(hasError)
 
@@ -386,6 +393,73 @@ struct DirectSessionCoordinatorTests {
 
         // 断开后为 false
         #expect(!coordinator.hasActiveSession)
+    }
+
+    // MARK: - 直连审批流（问题 2）
+
+    /// SessionProbePool 的 appendSession 是异步 Task，connect 返回后可能尚未入册——轮询等待。
+    private func waitForFirstSession(_ pool: SessionProbePool) async throws -> FakeDirectAgentSession {
+        for _ in 0..<200 {
+            if let session = await pool.firstSession() { return session }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return try #require(await pool.firstSession())
+    }
+
+    @Test("权限请求 yield permissionRequested 事件且 resolvePermission 回填决策")
+    func permissionRequestedEventAndResolve() async throws {
+        let (coordinator, pool) = makeCoordinator(outcomes: [.success(displayName: "Gemini")])
+        let agent = AgentInfo(type: .gemini, path: "/usr/bin/gemini", version: nil)
+
+        var permissionEvents: [ACPPermissionRequest] = []
+        let collectTask = Task {
+            for await event in coordinator.events {
+                if case .permissionRequested(let request) = event {
+                    permissionEvents.append(request)
+                }
+            }
+        }
+
+        await coordinator.connect(agent: agent, cwd: "/tmp/work")
+        let session = try await waitForFirstSession(pool)
+
+        // 模拟代理发起审批：handler 挂起直到 resolvePermission
+        let request = ACPPermissionRequest(description: "Edit file", tool: "edit", options: [])
+        let decisionTask = Task { await session.requestPermission(request) }
+
+        // 等待事件抵达 UI 层
+        var waited = 0
+        while permissionEvents.isEmpty && waited < 200 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(permissionEvents.first?.description == "Edit file")
+
+        coordinator.resolvePermission(approved: true)
+        let approved = await decisionTask.value
+        #expect(approved)
+
+        collectTask.cancel()
+    }
+
+    @Test("disconnect 时未决审批以 deny 解除，无泄漏")
+    func disconnectResolvesPendingPermission() async throws {
+        let (coordinator, pool) = makeCoordinator(outcomes: [.success(displayName: "Gemini")])
+        let agent = AgentInfo(type: .gemini, path: "/usr/bin/gemini", version: nil)
+        await coordinator.connect(agent: agent, cwd: "/tmp/work")
+        let session = try await waitForFirstSession(pool)
+
+        let decisionTask = Task {
+            await session.requestPermission(
+                ACPPermissionRequest(description: "Pending", tool: nil, options: []))
+        }
+        // 等待审批挂起注册到 coordinator
+        try await Task.sleep(for: .milliseconds(50))
+
+        await coordinator.disconnect()
+
+        let approved = await decisionTask.value
+        #expect(!approved)
     }
 }
 

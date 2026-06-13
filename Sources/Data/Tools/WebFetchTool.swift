@@ -67,6 +67,25 @@ nonisolated struct WebFetchTool: ToolProtocol, @unchecked Sendable {
             throw ToolError.invalidArguments("URL must start with http:// or https://")
         }
 
+        // SSRF 防护：拒绝非公网目标（IMDS / 回环 / 私网 / 链路本地 / CGNAT / IPv6 回环与 ULA）。
+        // fail-closed：host 缺失或无法解析也一律拒绝；拦截发生在任何远端命令执行之前。
+        // 域名场景为尽力而为：客户端解析与远端 curl 的 DNS 视图可能不一致，
+        // IP 锁定（curl --resolve）见后续 SSRF 加固计划。
+        guard let host = URL(string: url)?.host(percentEncoded: false), !host.isEmpty else {
+            throw ToolError.invalidArguments("URL has no resolvable host")
+        }
+        // classify 对域名走无超时的同步阻塞 getaddrinfo，而本方法会继承调用方执行上下文
+        //（NonisolatedNonsendingByDefault），源头是 MainActor——DNS 慢/超时会冻结 UI，
+        // 放后台 detached 执行（与 IPGeoService.lookupCountryCode 调用方的既有惯例一致）。
+        let hostClass = await Task.detached(priority: .utility) {
+            PrivateNetworkGuard.classify(host: host)
+        }.value
+        guard hostClass == .publicHost else {
+            throw ToolError.invalidArguments(
+                "Refusing to fetch non-public address (loopback/private/link-local/metadata)."
+            )
+        }
+
         let format = (arguments["format"] as? String) ?? "markdown"
         guard ["text", "markdown", "html"].contains(format) else {
             throw ToolError.invalidArguments("format must be one of: text, markdown, html")

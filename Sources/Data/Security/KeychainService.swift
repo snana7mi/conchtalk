@@ -25,7 +25,7 @@ nonisolated final class KeychainService: KeychainServiceProtocol, @unchecked Sen
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -87,7 +87,7 @@ nonisolated final class KeychainService: KeychainServiceProtocol, @unchecked Sen
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecValueData as String: keyData,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -151,7 +151,7 @@ nonisolated final class KeychainService: KeychainServiceProtocol, @unchecked Sen
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -466,6 +466,51 @@ nonisolated final class KeychainService: KeychainServiceProtocol, @unchecked Sen
         try deleteAccessToken()
         try deleteRefreshToken()
         try deleteTokenExpiry()
+    }
+
+    // MARK: - 存量迁移
+
+    /// 将存量凭据条目（password / sshkey / sshkey.passphrase）的 accessibility
+    /// 迁移为 AfterFirstUnlockThisDeviceOnly。幂等：全部成功后置位标记，之后不再执行。
+    /// 必须在前台（设备解锁）调用：SecItemUpdate 变更 accessibility 需要重新加密条目数据。
+    func migrateCredentialAccessibilityIfNeeded() {
+        let migratedKey = "KeychainService.credentialAccessibilityMigrated"
+        guard !UserDefaults.standard.bool(forKey: migratedKey) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound {
+            UserDefaults.standard.set(true, forKey: migratedKey)
+            return
+        }
+        guard status == errSecSuccess, let items = result as? [[String: Any]] else { return }
+
+        // ".sshkey." 前缀同时覆盖 ".sshkey.passphrase." 条目
+        let credentialPrefixes = ["\(servicePrefix).password.", "\(servicePrefix).sshkey."]
+        var allSucceeded = true
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  credentialPrefixes.contains(where: { account.hasPrefix($0) }) else { continue }
+            let updateQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrAccount as String: account,
+            ]
+            let attributes: [String: Any] = [
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            ]
+            let updateStatus = SecItemUpdate(updateQuery as CFDictionary, attributes as CFDictionary)
+            if updateStatus != errSecSuccess && updateStatus != errSecItemNotFound {
+                allSucceeded = false
+            }
+        }
+        if allSucceeded {
+            UserDefaults.standard.set(true, forKey: migratedKey)
+        }
     }
 }
 

@@ -9,12 +9,25 @@ actor LastActivityTracker {
 }
 
 /// StreamingToolExecutor：
-/// 执行工具（流式/非流式），管理 idle 超时（30s）和总超时（600s），
+/// 执行工具（流式/非流式），管理 idle 超时（30s）和总超时（3600s），
 /// 清理 ANSI 转义序列，增量解析 ACP 事件，节流 UI 回调（150ms）。
 enum StreamingToolExecutor {
 
     /// 流式执行的兜底安全超时（秒）。
     private static let streamingTimeout: TimeInterval = 3600
+
+    /// 累积输出上限（字节）：超限丢弃头部、保留尾部（最新输出对模型与用户最有价值）。
+    private static let maxAccumulatedBytes = 256 * 1024
+
+    /// 截断标记（英文，进入模型上下文，遵循「给 AI 的文案用英文」约定）。
+    private static let truncationMarker =
+        "[Output truncated: earlier output dropped, kept most recent portion]\n"
+
+    /// 对累积文本应用上限：超限时保留尾部约 cap/4 个字符（字符近似，避免逐字节切 UTF-8）。
+    private static func capAccumulated(_ text: String) -> (text: String, didTruncate: Bool) {
+        guard text.utf8.count > maxAccumulatedBytes else { return (text, false) }
+        return (String(text.suffix(maxAccumulatedBytes / 4)), true)
+    }
 
     /// 非流式工具执行的超时（秒），防止无限阻塞。
     private static let nonStreamingToolTimeout: TimeInterval = 120
@@ -26,7 +39,7 @@ enum StreamingToolExecutor {
     private static let uiThrottleInterval: TimeInterval = 0.15
 
     /// 执行工具，优先使用流式模式（若工具支持），否则回退到缓冲模式。
-    /// - 流式路径带 30s 空闲超时 + 600s 总超时保护，并对 UI 回调做节流（≥150ms/次）。
+    /// - 流式路径带 30s 空闲超时 + 3600s 总超时保护，并对 UI 回调做节流（≥150ms/次）。
     /// - Parameters:
     ///   - tool: 待执行的工具实例。
     ///   - arguments: 工具调用参数。
@@ -51,10 +64,13 @@ enum StreamingToolExecutor {
             return try await withThrowingTaskGroup(of: ToolExecutionResult.self) { group in
                 group.addTask {
                     let result = try await tool.execute(arguments: arguments, sshClient: sshClient)
-                    let cleaned = ToolExecutionResult(
-                        output: result.output.strippingANSIEscapes(),
-                        isSuccess: result.isSuccess
-                    )
+                    // 与流式路径共用同一 cap：所有工具（含 ExecuteSSHCommandTool）落库输出被单点保护
+                    let stripped = result.output.strippingANSIEscapes()
+                    let capped = Self.capAccumulated(stripped)
+                    let finalOutput = capped.didTruncate
+                        ? Self.truncationMarker + capped.text
+                        : capped.text
+                    let cleaned = ToolExecutionResult(output: finalOutput, isSuccess: result.isSuccess)
                     await onOutput(cleaned.output)
                     return cleaned
                 }
@@ -84,6 +100,7 @@ enum StreamingToolExecutor {
             // 任务 1：消费流式输出（带节流 + ACP 事件增量解析）
             group.addTask {
                 var accumulated = ""
+                var didTruncate = false
                 var lastUpdateTime: ContinuousClock.Instant = .now - .seconds(1)
                 var parser = ACPStreamParser()
                 var pendingEvents: [AgentStreamEvent] = []
@@ -94,8 +111,12 @@ enum StreamingToolExecutor {
                     guard !chunk.isEmpty else { continue }
                     let stripped = chunk.strippingANSIEscapes()
                     accumulated += stripped
+                    // 累积上限：超限丢头保尾，单次 onOutput 回调体积有界（O(N²) → O(N·cap)）
+                    let capped = Self.capAccumulated(accumulated)
+                    accumulated = capped.text
+                    if capped.didTruncate { didTruncate = true }
 
-                    // 增量解析 ACP 事件：只传新到达的片段（parser 内部维护残留行缓冲，O(N)）
+                    // 增量解析 ACP 事件：只传新到达的片段，不受 accumulated 截断影响
                     let newEvents = parser.parse(chunk: stripped)
                     pendingEvents.append(contentsOf: newEvents)
 
@@ -113,8 +134,11 @@ enum StreamingToolExecutor {
                 if !pendingEvents.isEmpty {
                     await onAgentEvents(pendingEvents)
                 }
-                await onOutput(accumulated)
-                return ToolExecutionResult(output: accumulated)
+                let finalOutput = didTruncate
+                    ? Self.truncationMarker + accumulated
+                    : accumulated
+                await onOutput(finalOutput)
+                return ToolExecutionResult(output: finalOutput)
             }
 
             // 任务 2：空闲超时守卫（每 5s 检查一次最后活跃时间）

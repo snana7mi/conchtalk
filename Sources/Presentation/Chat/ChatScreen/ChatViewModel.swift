@@ -25,6 +25,8 @@ final class ChatViewModel {
     var error: String?
     var pendingToolCall: ToolCall?
     var showConfirmation: Bool = false
+    /// 直连模式待审批请求（代理发起；nil 表示无待决审批）。
+    var directPermissionRequest: ACPPermissionRequest?
     var isContextCompressing: Bool = false
     var activeReasoningText: String = ""
     var activeContentText: String = ""
@@ -49,8 +51,16 @@ final class ChatViewModel {
     var isSyncingAfterCompletion = false
     /// 当前处于排队等待状态的消息 ID 集合（显示为半透明虚幻样式）。
     var queuedMessageIDs: Set<UUID> = []
+    /// 正在等待入队的消息 ID 集合（deferredEnqueueTask 进行中、尚未进入 coordinator 队列）。
+    /// 兜底自愈（syncAfterTaskCompletion / loadMessages 的交集修剪）据此区分
+    /// 「尚在入队途中」与「已不在排队」：前者的排队标记绝不能被摘除，
+    /// 否则入队前的撤回拦截会误判用户已撤回，导致消息被静默丢弃。
+    var pendingEnqueueMessageIDs: Set<UUID> = []
     /// 延迟 enqueue 任务（等待全量历史加载），disconnect 时需取消。
     var deferredEnqueueTask: Task<Void, Never>?
+    /// 用户消息持久化任务句柄（按消息 ID）。撤回时先等待写入完成再删除，
+    /// 防止「删除跑在插入前 → 消息复活」。持久化完成后自移除。
+    var messagePersistTasks: [UUID: Task<Void, Never>] = [:]
     /// Paywall 弹出状态（连接数限制触发时显示）。
     var showPaywall: Bool = false
 
@@ -247,6 +257,17 @@ final class ChatViewModel {
                 let loadingMsg = Message(id: UUID(), role: .assistant, content: "", isLoading: true)
                 messages.append(loadingMsg)
             }
+            // 以「队列 ∪ 等待入队」修剪排队标记：已被 dequeue 执行的消息摘除标记
+            let stillQueuedIDs = Set(taskCoordinator.taskQueue.tasks(for: serverID).map(\.id))
+            queuedMessageIDs.formIntersection(stillQueuedIDs.union(pendingEnqueueMessageIDs))
+        } else if taskCoordinator.taskQueue.isEmpty(for: serverID) {
+            // 自愈 stale 状态：任务运行中用户离开页面（observer 注销）后任务完成，
+            // syncAfterTaskCompletion 不会触发（它只经 observer 回调进入），
+            // isProcessing 与排队标记会残留——导致新消息被错误排队且 observer 永不挂载。
+            // 重进页面时无活动任务且队列为空 → 复位处理状态、清掉残留标记
+            //（仍在等待入队的消息除外，其标记必须保留）。
+            isProcessing = false
+            queuedMessageIDs.formIntersection(pendingEnqueueMessageIDs)
         }
     }
 
@@ -363,6 +384,7 @@ final class ChatViewModel {
     func clearPendingInteractionState() {
         showConfirmation = false
         pendingToolCall = nil
+        directPermissionRequest = nil
     }
 
     /// 清理流式阶段的瞬时 UI 状态。
@@ -452,11 +474,15 @@ final class ChatViewModel {
     // MARK: - 直连 session 事件消费
 
     /// 启动事件流消费任务。
+    /// 注意：闭包不长期持有强 self——挂起等待事件期间仅持有 weak self 与流本身。
+    /// 否则 VM → coordinator → continuation → 本任务 → VM 构成引用环，VM 永不释放，
+    /// isolated deinit 安全网也永不触发。
     func startDirectSessionEventConsumption() {
-        directEventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in self.directSessionCoordinator.events {
-                guard !Task.isCancelled else { break }
+        // events 捕获为局部常量：AsyncStream 是值类型，持有它不会保活 coordinator；
+        // 与现状语义一致（原实现也是在 for-await 开始时对流求值一次）。
+        directEventTask = Task { [weak self, events = directSessionCoordinator.events] in
+            for await event in events {
+                guard let self, !Task.isCancelled else { break }
                 await self.handleDirectSessionEvent(event)
             }
         }
@@ -492,6 +518,7 @@ final class ChatViewModel {
                 directStreamScrollTask = nil
                 removeLoadingMessages()
                 agentStreamEvents = []
+                directPermissionRequest = nil
             default:
                 break
             }
@@ -512,6 +539,8 @@ final class ChatViewModel {
             try? await store.addMessage(aiMsg, toServer: serverID)
         case .metadataUpdated:
             break // state 已通过 directSessionCoordinator.state 可观察
+        case .permissionRequested(let request):
+            directPermissionRequest = request
         case .error(let errorText):
             appendSystemMessage(errorText, type: .error)
         }
@@ -529,11 +558,24 @@ final class ChatViewModel {
         queuedMessageIDs.remove(messageID)
     }
 
-    /// 撤回排队中的消息（仅可撤回尚未开始执行的消息）。
+    /// 撤回排队中的消息：移除队列任务 + UI 消息 + 持久化记录。
+    /// 任务已开始执行时撤回失败，静默保留消息（用户可见「没撤掉」）。
     func recallQueuedMessage(_ messageID: UUID) {
         guard queuedMessageIDs.contains(messageID) else { return }
-        taskCoordinator.cancelQueuedTask(serverID: serverID, taskID: messageID)
+        let removed = taskCoordinator.cancelQueuedTask(serverID: serverID, taskID: messageID)
+        // 无论成败都摘掉排队标记
         queuedMessageIDs.remove(messageID)
+        // removed == false 有两种情形：任务正在执行（撤回失败，保留消息）；
+        // 尚未入队（撤回生效，deferredEnqueueTask 内的拦截保证其不会再入队）
+        if !removed && taskCoordinator.isExecutingTask(taskID: messageID, serverID: serverID) {
+            return
+        }
         messages.removeAll { $0.id == messageID }
+        let persistTask = messagePersistTasks.removeValue(forKey: messageID)
+        Task { [store] in
+            // 先等写入落盘，避免删除跑在插入前
+            await persistTask?.value
+            try? await store.deleteMessage(messageID)
+        }
     }
 }

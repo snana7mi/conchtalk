@@ -33,6 +33,8 @@ actor DirectAgentSession: DirectAgentSessionType {
     private(set) var modesInfo: ModesInfo?
     /// config/command 状态变化回调，用于通知 ViewModel 刷新。
     private var configUpdateHandler: (@Sendable () -> Void)?
+    /// 权限请求回调，桥接到底层 AgentConnection。
+    private var permissionHandler: (@Sendable (ACPPermissionRequest) async -> Bool)?
 
     // MARK: - 连接类型路由
 
@@ -70,6 +72,12 @@ actor DirectAgentSession: DirectAgentSessionType {
     /// 设置 config/command 状态更新回调。
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void) {
         self.configUpdateHandler = handler
+    }
+
+    /// 设置权限请求回调；已连接时同步注册到底层 connection。
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) async {
+        permissionHandler = handler
+        await agentConnection?.setPermissionHandler(handler)
     }
 
     private func notifyConfigChanged() {
@@ -130,6 +138,9 @@ actor DirectAgentSession: DirectAgentSessionType {
         }
         await connection.setConfigUpdateHandler { [weak self] in
             Task { await self?.handleConfigUpdate() }
+        }
+        if let permissionHandler {
+            await connection.setPermissionHandler(permissionHandler)
         }
 
         // 连接

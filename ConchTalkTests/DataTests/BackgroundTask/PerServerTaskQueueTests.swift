@@ -143,4 +143,29 @@ struct PerServerTaskQueueTests {
 
         #expect(queue.count(for: serverID) == 2)
     }
+
+    @Test("cancel 移除存在的任务并返回 true")
+    func cancel_removesTask_andReturnsTrue() {
+        let queue = PerServerTaskQueue()
+        let serverID = UUID()
+        let taskID = UUID()
+        queue.enqueue(QueuedTask(id: taskID, serverID: serverID, text: "to cancel"))
+
+        let removed = queue.cancel(serverID: serverID, taskID: taskID)
+
+        #expect(removed == true)
+        #expect(queue.isEmpty(for: serverID))
+    }
+
+    @Test("cancel 不存在的任务返回 false")
+    func cancel_unknownID_returnsFalse() {
+        let queue = PerServerTaskQueue()
+        let serverID = UUID()
+        queue.enqueue(QueuedTask(serverID: serverID, text: "kept"))
+
+        let removed = queue.cancel(serverID: serverID, taskID: UUID())
+
+        #expect(removed == false)
+        #expect(queue.count(for: serverID) == 1)
+    }
 }

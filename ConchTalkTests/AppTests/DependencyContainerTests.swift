@@ -89,7 +89,6 @@ struct DependencyContainerTests {
         _ = tec.stateStore
         _ = tec.lifecycleManager
         _ = tec.keepAlive
-        _ = tec.eventStream
 
         // 验证初始状态正确
         #expect(tec.activeTaskServerIDs.isEmpty)

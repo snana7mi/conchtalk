@@ -209,4 +209,100 @@ struct ExecuteSSHCommandToolTests {
             #expect(sut.validateSafety(arguments: args(command: "sudo ls")) == .needsConfirmation)
         }
     }
+
+    // MARK: - 白名单写重定向绕过测试
+
+    @Suite("Whitelist write redirection bypass")
+    struct WhitelistWriteRedirectionTests {
+
+        private let sut = ExecuteSSHCommandTool()
+
+        private func args(command: String, isDestructive: Bool = false) -> [String: Any] {
+            ["command": command, "is_destructive": isDestructive, "explanation": "test"]
+        }
+
+        @Test("echo 追加 authorized_keys 触发确认")
+        func echoAppendAuthorizedKeys() {
+            #expect(sut.validateSafety(arguments: args(command: "echo 'ssh-ed25519 AAAA attacker' >> ~/.ssh/authorized_keys")) == .needsConfirmation)
+        }
+
+        @Test("echo 覆写 .bashrc 触发确认")
+        func echoOverwriteBashrc() {
+            #expect(sut.validateSafety(arguments: args(command: "echo x > ~/.bashrc")) == .needsConfirmation)
+        }
+
+        @Test("printf 写 .profile 触发确认")
+        func printfAppendProfile() {
+            #expect(sut.validateSafety(arguments: args(command: "printf 'x' >> ~/.profile")) == .needsConfirmation)
+        }
+
+        @Test("重定向写 /tmp 脚本触发确认")
+        func redirectToTmpScript() {
+            #expect(sut.validateSafety(arguments: args(command: "echo x > /tmp/evil.sh")) == .needsConfirmation)
+        }
+
+        @Test("重定向写 /opt 触发确认")
+        func redirectToOpt() {
+            #expect(sut.validateSafety(arguments: args(command: "echo x >> /opt/app/run")) == .needsConfirmation)
+        }
+
+        @Test("管道读链末端重定向写文件触发确认")
+        func pipeChainWithRedirect() {
+            #expect(sut.validateSafety(arguments: args(command: "cat /etc/hosts | grep x > out.txt")) == .needsConfirmation)
+        }
+
+        @Test("tee 写文件触发确认（回归，确认仍拦）")
+        func teeWrite() {
+            #expect(sut.validateSafety(arguments: args(command: "echo x | tee ~/.bashrc")) == .needsConfirmation)
+        }
+
+        @Test("heredoc 触发确认")
+        func heredoc() {
+            let cmd = "cat > ~/.config/systemd/user/evil.service <<'EOF'\n[Service]\nEOF"
+            #expect(sut.validateSafety(arguments: args(command: cmd)) == .needsConfirmation)
+        }
+
+        @Test("herestring 触发确认")
+        func herestring() {
+            #expect(sut.validateSafety(arguments: args(command: "cat <<< 'x' > ~/.bashrc")) == .needsConfirmation)
+        }
+
+        @Test("is_destructive=false 不能降低写命令风险")
+        func isDestructiveFalseCannotLowerRisk() {
+            let arguments = args(command: "echo 'k' >> ~/.ssh/authorized_keys", isDestructive: false)
+            #expect(sut.validateSafety(arguments: arguments) == .needsConfirmation)
+        }
+    }
+
+    // MARK: - 误报与回归守护测试
+
+    @Suite("No false-positive / regression guards")
+    struct NoFalsePositiveTests {
+
+        private let sut = ExecuteSSHCommandTool()
+
+        private func args(command: String, isDestructive: Bool = false) -> [String: Any] {
+            ["command": command, "is_destructive": isDestructive, "explanation": "test"]
+        }
+
+        @Test("纯读命令保持 safe", arguments: ["ls -la", "cat /etc/hosts"])
+        func pureReadStaysSafe(command: String) {
+            #expect(sut.validateSafety(arguments: args(command: command)) == .safe)
+        }
+
+        @Test("纯管道读链保持 safe")
+        func pipeReadChainStaysSafe() {
+            #expect(sut.validateSafety(arguments: args(command: "cat /etc/hosts | grep localhost")) == .safe)
+        }
+
+        @Test("2>/dev/null 维持 needsConfirmation（与现状一致，不豁免 /dev/null）")
+        func devNullRedirectNeedsConfirmation() {
+            #expect(sut.validateSafety(arguments: args(command: "ls 2>/dev/null")) == .needsConfirmation)
+        }
+
+        @Test("2>&1 维持 needsConfirmation（& 分段所致，pre-existing 行为）")
+        func fdDupNeedsConfirmation() {
+            #expect(sut.validateSafety(arguments: args(command: "ps aux 2>&1")) == .needsConfirmation)
+        }
+    }
 }

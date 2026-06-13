@@ -26,33 +26,11 @@ nonisolated enum IPGeoService {
 
     // MARK: - Private IP Detection
 
-    /// 判断是否为公网 IPv4 地址。
+    /// 判断是否为公网 IPv4 地址（委托 PrivateNetworkGuard，消除私网范围的重复定义）。
     private static func isPublicIPv4(_ ip: String) -> Bool {
         let parts = ip.split(separator: ".").compactMap { UInt8($0) }
         guard parts.count == 4 else { return false }
-
-        let a = parts[0], b = parts[1]
-
-        // 10.0.0.0/8 — 私网
-        if a == 10 { return false }
-        // 172.16.0.0/12 — 私网
-        if a == 172 && (b >= 16 && b <= 31) { return false }
-        // 192.168.0.0/16 — 私网
-        if a == 192 && b == 168 { return false }
-        // 127.0.0.0/8 — 回环
-        if a == 127 { return false }
-        // 169.254.0.0/16 — 链路本地
-        if a == 169 && b == 254 { return false }
-        // 0.0.0.0/8 — 当前网络
-        if a == 0 { return false }
-        // 100.64.0.0/10 — CGNAT
-        if a == 100 && (b >= 64 && b <= 127) { return false }
-        // 224.0.0.0/4 — 组播
-        if a >= 224 && a <= 239 { return false }
-        // 240.0.0.0/4 — 保留
-        if a >= 240 { return false }
-
-        return true
+        return PrivateNetworkGuard.isPublicIPv4Bytes(parts)
     }
 
     /// 将域名解析为 IPv4 地址。

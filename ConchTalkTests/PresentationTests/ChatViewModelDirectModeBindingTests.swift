@@ -200,6 +200,34 @@ struct ChatViewModelDirectModeBindingTests {
         #expect(aiContextMessages.last?.content == "[Context] Direct session summary")
     }
 
+    @Test("permissionRequested 事件设置 directPermissionRequest 状态")
+    func handlePermissionRequestedEvent() async throws {
+        let store = try ChatViewModelTestSupport.makeInMemoryStore()
+        let vm = ChatViewModelTestSupport.makeViewModel(
+            server: TestFixtures.makeServer(), store: store)
+
+        let request = ACPPermissionRequest(
+            description: "Run npm install", tool: "execute", options: [])
+        await vm.handleDirectSessionEvent(.permissionRequested(request))
+
+        #expect(vm.directPermissionRequest?.description == "Run npm install")
+    }
+
+    @Test("lifecycle idle 时清空 directPermissionRequest")
+    func lifecycleIdleClearsDirectPermissionRequest() async throws {
+        let store = try ChatViewModelTestSupport.makeInMemoryStore()
+        let vm = ChatViewModelTestSupport.makeViewModel(
+            server: TestFixtures.makeServer(), store: store)
+
+        let request = ACPPermissionRequest(
+            description: "Pending edit", tool: "edit", options: [])
+        await vm.handleDirectSessionEvent(.permissionRequested(request))
+        #expect(vm.directPermissionRequest != nil)
+
+        await vm.handleDirectSessionEvent(.lifecycleChanged(.idle))
+        #expect(vm.directPermissionRequest == nil)
+    }
+
     // MARK: - 辅助
 
     private func makeCoordinator(

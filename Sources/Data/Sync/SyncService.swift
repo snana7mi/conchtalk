@@ -1,22 +1,24 @@
 /// 文件说明：SyncService，云同步的编排入口，串行执行 push → pull → merge。
 import Foundation
+import CryptoKit
 
 /// SyncService：
 /// App 进后台时调用 `sync()`，串行执行变更收集 → 加密 → 上传 → 下载 → 解密 → 合并。
 /// 使用 actor 保证同一时间只有一个同步流程在运行。
 actor SyncService {
     private let crypto: SyncCryptoService
-    private let apiClient: SyncAPIClient
+    private let apiClient: SyncAPIClientProtocol
     private let collector: SyncChangeCollector
     private let mergeEngine: SyncMergeEngine
     private let store: SwiftDataStore
-    private let authService: AuthService
+    private let authService: AuthServiceProtocol
 
     /// 最近一次同步结果，供 UI 展示。
     struct SyncResult: Sendable {
         let success: Bool
         let pushedEntries: Int
         let pulledEntries: Int
+        let skippedEntries: Int   // 本轮 pull 被隔离跳过的坏条目数（数据级永久错误）
         let prunedCount: Int
         let conflictCount: Int  // LWW 覆盖的冲突次数
         let error: String?
@@ -26,8 +28,8 @@ actor SyncService {
     private(set) var lastResult: SyncResult?
     private var isSyncing = false
 
-    init(crypto: SyncCryptoService, apiClient: SyncAPIClient, collector: SyncChangeCollector,
-         mergeEngine: SyncMergeEngine, store: SwiftDataStore, authService: AuthService) {
+    init(crypto: SyncCryptoService, apiClient: SyncAPIClientProtocol, collector: SyncChangeCollector,
+         mergeEngine: SyncMergeEngine, store: SwiftDataStore, authService: AuthServiceProtocol) {
         self.crypto = crypto
         self.apiClient = apiClient
         self.collector = collector
@@ -50,11 +52,12 @@ actor SyncService {
         }
         isSyncing = true
         defer { isSyncing = false }
-        print("[SyncService] Starting sync (lastPushed=\(SyncState.lastSyncedVersion), lastPull=\(SyncState.lastPullTimestamp), device=\(SyncState.deviceId.prefix(8))...)")
+        print("[SyncService] Starting sync (lastPushed=\(SyncState.lastSyncedVersion), lastPulledSeq=\(SyncState.lastPulledSeq), device=\(SyncState.deviceId.prefix(8))...)")
 
         var totalPushed = 0
         var totalPulled = 0
         var totalPruned = 0
+        var skippedEntries = 0
 
         do {
             // --- Push ---
@@ -95,64 +98,77 @@ actor SyncService {
 
             guard !isExpiring() else {
                 lastResult = SyncResult(success: true, pushedEntries: totalPushed, pulledEntries: 0,
-                                       prunedCount: totalPruned, conflictCount: 0, error: "Interrupted by system", timestamp: Date())
+                                       skippedEntries: skippedEntries, prunedCount: totalPruned, conflictCount: 0,
+                                       error: "Interrupted by system", timestamp: Date())
                 return
             }
 
-            // --- Pull（复合游标避免 off-by-one）---
+            // --- Pull（服务端 seq 游标；单条隔离见 isPermanentDataError）---
             // 收集 server→groupID 映射，pull 完成后修复分组关系
             var serverGroupMappings: [UUID: UUID] = [:]
             let pullDecoder = JSONDecoder()
             pullDecoder.dateDecodingStrategy = .iso8601
 
-            var cursorSince = SyncState.lastPullTimestamp
-            var cursorSinceId = ""
+            var cursorSeq = SyncState.lastPulledSeq
             var totalConflicts = 0
-            print("[SyncService] Pull: starting from cursor=\(cursorSince)")
+            var consecutiveFailures = 0
+            print("[SyncService] Pull: starting from seq=\(cursorSeq)")
             while !isExpiring() {
                 let pullResponse = try await apiClient.pull(
-                    since: cursorSince, sinceId: cursorSinceId,
-                    deviceId: SyncState.deviceId
+                    sinceSeq: cursorSeq, deviceId: SyncState.deviceId, limit: 100
                 )
 
                 print("[SyncService] Pull page: \(pullResponse.entries.count) entries, hasMore=\(pullResponse.next_cursor != nil)")
                 for entry in pullResponse.entries {
                     guard let entityType = SyncEntityType(rawValue: entry.entity_type),
                           let encryptedData = Data(base64Encoded: entry.data) else {
+                        skippedEntries += 1
+                        consecutiveFailures += 1
                         print("[SyncService] Pull: skipped invalid entry type=\(entry.entity_type), id=\(entry.entity_id)")
+                        try checkConsecutiveFailures(consecutiveFailures)
                         continue
                     }
+                    do {
+                        let decrypted = try await crypto.decrypt(encryptedData, entityType: entityType)
 
-                    let decrypted = try await crypto.decrypt(encryptedData, entityType: entityType)
-
-                    // 提取 server 的 groupID 映射（用于后续修复分组关系）
-                    if entityType == .server,
-                       let server = try? pullDecoder.decode(SwiftDataStore.SyncableServer.self, from: decrypted),
-                       !server.isDeleted {
-                        if let groupID = server.groupID {
-                            serverGroupMappings[server.id] = groupID
-                        } else {
-                            serverGroupMappings.removeValue(forKey: server.id)
+                        // 提取 server 的 groupID 映射（用于后续修复分组关系）
+                        if entityType == .server,
+                           let server = try? pullDecoder.decode(SwiftDataStore.SyncableServer.self, from: decrypted),
+                           !server.isDeleted {
+                            if let groupID = server.groupID {
+                                serverGroupMappings[server.id] = groupID
+                            } else {
+                                serverGroupMappings.removeValue(forKey: server.id)
+                            }
                         }
-                    }
 
-                    let result = try await mergeEngine.merge(entityType: entityType, jsonData: decrypted)
-                    totalPulled += result.merged
-                    totalConflicts += result.conflicts
+                        let result = try await mergeEngine.merge(entityType: entityType, jsonData: decrypted)
+                        totalPulled += result.merged
+                        totalConflicts += result.conflicts
+                        consecutiveFailures = 0
+                    } catch where isPermanentDataError(error) {
+                        // 数据级永久错误：跳过该条继续，游标推进越过它是有意取舍——
+                        // 损坏数据重拉一万次也解不开；服务端原数据仍在，解码修复后可 forceFullSync 补救。
+                        skippedEntries += 1
+                        consecutiveFailures += 1
+                        print("[SyncService] Pull: skipped corrupt entry type=\(entry.entity_type), id=\(entry.entity_id), error=\(error)")
+                        try checkConsecutiveFailures(consecutiveFailures)
+                    }
+                    // 其余错误（含 SyncMergeError、KeychainError）不被捕获，
+                    // 自然上抛 → 整体 catch → 本页游标不推进 → 下次同步重试
                 }
 
-                if let cursor = pullResponse.next_cursor {
-                    cursorSince = cursor.since
-                    cursorSinceId = cursor.since_id
-                    SyncState.lastPullTimestamp = cursor.since
+                if let nextCursor = pullResponse.next_cursor {
+                    cursorSeq = nextCursor.seq
+                    SyncState.lastPulledSeq = nextCursor.seq
                 } else {
-                    if let lastEntry = pullResponse.entries.last {
-                        SyncState.lastPullTimestamp = lastEntry.modified_at
-                    } else if pullResponse.entries.isEmpty && cursorSince == "1970-01-01T00:00:00Z" {
-                        // 单设备场景：pull 排除自身 device_id 后返回空，更新游标避免每次启动重复 recovery sync
-                        let now = ISO8601DateFormatter().string(from: Date())
-                        SyncState.lastPullTimestamp = now
+                    // 末页：S2 响应不含 entries[].seq，满页场景已由 next_cursor.seq 推进。
+                    // Mock/测试可携带 seq 以断言末页推进；线上末页无 seq 时保持当前游标（幂等重拉）。
+                    if let lastSeq = pullResponse.entries.compactMap(\.seq).last {
+                        SyncState.lastPulledSeq = lastSeq
                     }
+                    // 空页：游标保持不动。seq 语义下空查询走索引、代价恒低，
+                    // 无需也不允许任何「跳到 now」类特判。
                     break
                 }
             }
@@ -166,8 +182,9 @@ actor SyncService {
             try await store.purgeSoftDeletedEntities(olderThan: SyncGarbageCollector.softDeleteRetentionDays)
 
             lastResult = SyncResult(success: true, pushedEntries: totalPushed, pulledEntries: totalPulled,
-                                   prunedCount: totalPruned, conflictCount: totalConflicts, error: nil, timestamp: Date())
-            print("[SyncService] Done: pushed=\(totalPushed), pulled=\(totalPulled), pruned=\(totalPruned), conflicts=\(totalConflicts)")
+                                   skippedEntries: skippedEntries, prunedCount: totalPruned, conflictCount: totalConflicts,
+                                   error: nil, timestamp: Date())
+            print("[SyncService] Done: pushed=\(totalPushed), pulled=\(totalPulled), skipped=\(skippedEntries), pruned=\(totalPruned), conflicts=\(totalConflicts)")
 
             // pull 有新数据时通知 UI 刷新
             if totalPulled > 0 {
@@ -180,12 +197,35 @@ actor SyncService {
             // 密钥被其他设备重置：重置同步状态，下次全量重传
             SyncState.reset()
             lastResult = SyncResult(success: false, pushedEntries: totalPushed, pulledEntries: totalPulled,
-                                   prunedCount: totalPruned, conflictCount: 0, error: error.localizedDescription, timestamp: Date())
+                                   skippedEntries: skippedEntries, prunedCount: totalPruned, conflictCount: 0,
+                                   error: error.localizedDescription, timestamp: Date())
 
         } catch {
             lastResult = SyncResult(success: false, pushedEntries: totalPushed, pulledEntries: totalPulled,
-                                   prunedCount: totalPruned, conflictCount: 0, error: error.localizedDescription, timestamp: Date())
+                                   skippedEntries: skippedEntries, prunedCount: totalPruned, conflictCount: 0,
+                                   error: error.localizedDescription, timestamp: Date())
             print("[SyncService] Sync failed: \(error)")
+        }
+    }
+
+    // MARK: - Pull 错误分类与阈值
+
+    /// 连续失败阈值：连续（每成功一条归零）跳过 10 条几乎必然是系统性故障（典型：master key 错配）。
+    /// 继续逐条跳过会把全部云端数据静默跳光且游标推进到末尾，必须中止并经 lastResult.error 告警。
+    private static let maxConsecutivePullFailures = 10
+
+    /// 判定是否为数据级永久错误：数据本身损坏，重试无意义，可安全跳过。
+    /// 白名单之外的一切错误（SyncMergeError、KeychainError、SwiftData、网络等）
+    /// 视为环境级暂时错误，必须上抛中止、保留游标与重试机会（fail-safe：白名单跳过、默认中止）。
+    private func isPermanentDataError(_ error: Error) -> Bool {
+        if error is DecodingError { return true }
+        if error is CryptoKitError { return true }
+        return false
+    }
+
+    private func checkConsecutiveFailures(_ count: Int) throws {
+        if count >= Self.maxConsecutivePullFailures {
+            throw SyncServiceError.tooManyConsecutivePullFailures(count: count)
         }
     }
 
@@ -232,4 +272,17 @@ actor SyncService {
         }
     }
 
+}
+
+/// SyncServiceError：同步编排层错误。
+enum SyncServiceError: LocalizedError {
+    /// pull 连续失败超过阈值：几乎必然是系统性问题（如密钥错配），中止并保留游标。
+    case tooManyConsecutivePullFailures(count: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .tooManyConsecutivePullFailures(let count):
+            "Pull aborted: \(count) consecutive entry failures (possible key mismatch or data corruption)"
+        }
+    }
 }

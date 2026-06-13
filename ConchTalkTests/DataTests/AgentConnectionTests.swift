@@ -56,6 +56,17 @@ actor MockAgentConnection: AgentConnection {
         configUpdateHandler = handler
     }
 
+    private(set) var permissionHandler: (@Sendable (ACPPermissionRequest) async -> Bool)?
+
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) {
+        permissionHandler = handler
+    }
+
+    /// 测试用：模拟代理发起权限请求，透传给已注册 handler。
+    func simulatePermissionRequest(_ request: ACPPermissionRequest) async -> Bool {
+        await permissionHandler?(request) ?? false
+    }
+
     /// 模拟异常断开，触发 disconnectHandler。
     func simulateDisconnect() {
         isConnected = false
@@ -200,5 +211,37 @@ struct AgentConnectionTests {
         #expect(await boundary.modelsInfo?.currentModelId == "model.b")
         #expect(await boundary.modesInfo?.currentModeId == "mode.review")
         #expect(await boundary.configOptions.map(\.id.value) == ["approval-mode"])
+    }
+
+    @Test("setPermissionHandler 存储 handler 且请求透传决策")
+    func permissionHandlerStoredAndForwarded() async {
+        let connection = MockAgentConnection()
+        await connection.setPermissionHandler { request in
+            request.description == "approve me"
+        }
+
+        let approved = await connection.simulatePermissionRequest(
+            ACPPermissionRequest(description: "approve me", tool: nil, options: []))
+        let denied = await connection.simulatePermissionRequest(
+            ACPPermissionRequest(description: "other", tool: nil, options: []))
+        #expect(approved)
+        #expect(!denied)
+    }
+
+    @Test("ACPAgentConnection 与 DirectAgentSession 未连接时注册 handler 不崩溃")
+    func setPermissionHandlerBeforeConnectIsSafe() async {
+        // ACPAgentConnection：sshClient 可空，仅暂存 handler
+        let acpConnection = ACPAgentConnection(
+            sshClient: nil,
+            agentInfo: AgentInfo(type: .gemini, path: "/usr/bin/gemini", version: nil))
+        await acpConnection.setPermissionHandler { _ in true }
+
+        // DirectAgentSession：connection 尚未创建，仅暂存
+        let session = DirectAgentSession(
+            agentInfo: AgentInfo(type: .gemini, path: "/usr/bin/gemini", version: nil),
+            sshClient: nil)
+        await session.setPermissionHandler { _ in true }
+        // 走到这里未崩溃即通过；ClaudeCode/Codex 的实现由编译期协议一致性保证
+        #expect(Bool(true))
     }
 }

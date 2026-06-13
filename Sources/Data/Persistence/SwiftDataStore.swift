@@ -333,6 +333,21 @@ actor SwiftDataStore {
         }
     }
 
+    /// 软删除单条消息（撤回排队消息用）。目标不存在或已删除时静默成功（幂等）。
+    /// - Parameter messageID: 消息标识。
+    /// - Throws: SwiftData 查询/保存失败时抛出。
+    func deleteMessage(_ messageID: UUID) async throws {
+        let mid = messageID
+        let predicate = #Predicate<MessageModel> { $0.id == mid && $0.isDeleted == false }
+        if let model = try modelContext.fetch(FetchDescriptor(predicate: predicate)).first {
+            model.isDeleted = true
+            model.syncVersion = await SyncVersionCounter.shared.next()
+            model.modifiedAt = Date()
+            model.isRemoteMerge = false
+            try modelContext.save()
+        }
+    }
+
     // MARK: - Group Operations
 
     /// 保存服务器分组。
@@ -846,13 +861,18 @@ actor SwiftDataStore {
         let predicate = #Predicate<ServerModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
         var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).map {
+        let models = try modelContext.fetch(descriptor)
+        let ids = models.map(\.id)
+        let deletedPredicate = #Predicate<ServerModel> { ids.contains($0.id) && $0.isDeleted == true }
+        let deletedIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: deletedPredicate)).map(\.id))
+        return models.map {
             SyncableServer(id: $0.id, name: $0.name, host: $0.host, port: $0.port, username: $0.username,
                           authMethodRaw: $0.authMethodRaw, countryCode: $0.countryCode, iconData: $0.iconData,
                           lastConnectedAt: $0.lastConnectedAt, permissionLevelRaw: $0.permissionLevelRaw,
                           expirationDate: $0.expirationDate, createdAt: $0.createdAt,
-                          syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt, isDeleted: $0.isDeleted,
-                          isRemoteMerge: $0.isRemoteMerge, groupID: $0.group?.id, password: nil)
+                          syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
+                          isDeleted: deletedIDs.contains($0.id), isRemoteMerge: $0.isRemoteMerge,
+                          groupID: $0.group?.id, password: nil)
         }
     }
 
@@ -868,12 +888,18 @@ actor SwiftDataStore {
         let predicate = #Predicate<MessageModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
         var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).map {
+        let models = try modelContext.fetch(descriptor)
+        // isDeleted 属性直读与 NSManagedObject.isDeleted（上下文删除标志）同名冲突，
+        // 读回恒为 false（列值实际正确）；改用 SQL 谓词回查已删除集合，保证 tombstone 如实上报。
+        let ids = models.map(\.id)
+        let deletedPredicate = #Predicate<MessageModel> { ids.contains($0.id) && $0.isDeleted == true }
+        let deletedIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: deletedPredicate)).map(\.id))
+        return models.map {
             SyncableMessage(id: $0.id, serverID: $0.serverID, roleRaw: $0.roleRaw, content: $0.content,
                            timestamp: $0.timestamp, commandOutput: $0.commandOutput, toolCallJSON: $0.toolCallJSON,
                            reasoningContent: $0.reasoningContent, systemMessageTypeRaw: $0.systemMessageTypeRaw,
                            sourceJSON: $0.sourceJSON, syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
-                           isDeleted: $0.isDeleted, isRemoteMerge: $0.isRemoteMerge)
+                           isDeleted: deletedIDs.contains($0.id), isRemoteMerge: $0.isRemoteMerge)
         }
     }
 
@@ -889,11 +915,15 @@ actor SwiftDataStore {
         let predicate = #Predicate<SSHKeyModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
         var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).map {
+        let models = try modelContext.fetch(descriptor)
+        let ids = models.map(\.id)
+        let deletedPredicate = #Predicate<SSHKeyModel> { ids.contains($0.id) && $0.isDeleted == true }
+        let deletedIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: deletedPredicate)).map(\.id))
+        return models.map {
             SyncableSSHKey(id: $0.id, label: $0.label, keyTypeRaw: $0.keyTypeRaw, fingerprint: $0.fingerprint,
                           publicKeyOpenSSH: $0.publicKeyOpenSSH, sourceRaw: $0.sourceRaw, createdAt: $0.createdAt,
                           privateKeyData: nil, syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
-                          isDeleted: $0.isDeleted, isRemoteMerge: $0.isRemoteMerge)
+                          isDeleted: deletedIDs.contains($0.id), isRemoteMerge: $0.isRemoteMerge)
         }
     }
 
@@ -907,10 +937,14 @@ actor SwiftDataStore {
         let predicate = #Predicate<ServerGroupModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
         var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).map {
+        let models = try modelContext.fetch(descriptor)
+        let ids = models.map(\.id)
+        let deletedPredicate = #Predicate<ServerGroupModel> { ids.contains($0.id) && $0.isDeleted == true }
+        let deletedIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: deletedPredicate)).map(\.id))
+        return models.map {
             SyncableServerGroup(id: $0.id, name: $0.name, sortOrder: $0.sortOrder, colorTag: $0.colorTag,
                                createdAt: $0.createdAt, syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
-                               isDeleted: $0.isDeleted, isRemoteMerge: $0.isRemoteMerge)
+                               isDeleted: deletedIDs.contains($0.id), isRemoteMerge: $0.isRemoteMerge)
         }
     }
 
@@ -924,10 +958,14 @@ actor SwiftDataStore {
         let predicate = #Predicate<MemoryModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
         var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).map {
+        let models = try modelContext.fetch(descriptor)
+        let ids = models.map(\.id)
+        let deletedPredicate = #Predicate<MemoryModel> { ids.contains($0.id) && $0.isDeleted == true }
+        let deletedIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: deletedPredicate)).map(\.id))
+        return models.map {
             SyncableMemory(id: $0.id, serverID: $0.serverID, content: $0.content, updatedAt: $0.updatedAt,
-                          syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt, isDeleted: $0.isDeleted,
-                          isRemoteMerge: $0.isRemoteMerge)
+                          syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
+                          isDeleted: deletedIDs.contains($0.id), isRemoteMerge: $0.isRemoteMerge)
         }
     }
 
@@ -942,11 +980,15 @@ actor SwiftDataStore {
         let predicate = #Predicate<MemoryEntryModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
         var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).map {
+        let models = try modelContext.fetch(descriptor)
+        let ids = models.map(\.id)
+        let deletedPredicate = #Predicate<MemoryEntryModel> { ids.contains($0.id) && $0.isDeleted == true }
+        let deletedIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: deletedPredicate)).map(\.id))
+        return models.map {
             SyncableMemoryEntry(id: $0.id, serverID: $0.serverID, content: $0.content, tags: $0.tags,
                                entities: $0.entities, createdAt: $0.createdAt, source: $0.source,
-                               syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt, isDeleted: $0.isDeleted,
-                               isRemoteMerge: $0.isRemoteMerge)
+                               syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
+                               isDeleted: deletedIDs.contains($0.id), isRemoteMerge: $0.isRemoteMerge)
         }
     }
 
@@ -961,11 +1003,15 @@ actor SwiftDataStore {
         let predicate = #Predicate<SystemProfileModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
         var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).map {
+        let models = try modelContext.fetch(descriptor)
+        let ids = models.map(\.serverID)
+        let deletedPredicate = #Predicate<SystemProfileModel> { ids.contains($0.serverID) && $0.isDeleted == true }
+        let deletedIDs = Set(try modelContext.fetch(FetchDescriptor(predicate: deletedPredicate)).map(\.serverID))
+        return models.map {
             SyncableSystemProfile(serverID: $0.serverID, osInfo: $0.osInfo, packageManager: $0.packageManager,
                                  toolsJSON: $0.toolsJSON, detectedAt: $0.detectedAt,
-                                 syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt, isDeleted: $0.isDeleted,
-                                 isRemoteMerge: $0.isRemoteMerge)
+                                 syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
+                                 isDeleted: deletedIDs.contains($0.serverID), isRemoteMerge: $0.isRemoteMerge)
         }
     }
 
@@ -973,7 +1019,13 @@ actor SwiftDataStore {
 
     /// 合并远端服务器数据：按 id 匹配，modifiedAt 较新者胜出。
     /// 合入的数据标记 isRemoteMerge = true，避免 ping-pong 二次推送。
-    func mergeRemoteServer(_ remote: SyncableServer) async throws -> Int {
+    /// - Parameter onRemoteWin: 仅在远端胜出（更新或新建分支）时、save() 之前调用。
+    ///   典型用途是凭据写回 Keychain；闭包抛错则 rollback 本条未保存的变更并上抛，
+    ///   元数据与凭据都不落地，下次 pull 重拉时 LWW 判定依然成立、写回获得重试机会。
+    func mergeRemoteServer(
+        _ remote: SyncableServer,
+        onRemoteWin: (@Sendable () throws -> Void)? = nil
+    ) async throws -> Int {
         let predicate = #Predicate<ServerModel> { $0.id == remote.id }
         let existing = try modelContext.fetch(FetchDescriptor(predicate: predicate)).first
 
@@ -1005,6 +1057,12 @@ actor SwiftDataStore {
                 } else {
                     existing.group = nil
                 }
+                do {
+                    try onRemoteWin?()
+                } catch {
+                    modelContext.rollback()
+                    throw error
+                }
                 try modelContext.save()
                 return 1
             }
@@ -1022,6 +1080,12 @@ actor SwiftDataStore {
                 let gid = groupID
                 let groupPredicate = #Predicate<ServerGroupModel> { $0.id == gid }
                 model.group = try modelContext.fetch(FetchDescriptor(predicate: groupPredicate)).first
+            }
+            do {
+                try onRemoteWin?()
+            } catch {
+                modelContext.rollback()
+                throw error
             }
             modelContext.insert(model)
             try modelContext.save()
@@ -1072,7 +1136,11 @@ actor SwiftDataStore {
     }
 
     /// 合并远端 SSH 密钥。
-    func mergeRemoteSSHKey(_ remote: SyncableSSHKey) async throws -> Int {
+    /// - Parameter onRemoteWin: 语义同 mergeRemoteServer 的同名参数（私钥写回注入点）。
+    func mergeRemoteSSHKey(
+        _ remote: SyncableSSHKey,
+        onRemoteWin: (@Sendable () throws -> Void)? = nil
+    ) async throws -> Int {
         let predicate = #Predicate<SSHKeyModel> { $0.id == remote.id }
         let existing = try modelContext.fetch(FetchDescriptor(predicate: predicate)).first
 
@@ -1090,6 +1158,12 @@ actor SwiftDataStore {
                 existing.modifiedAt = remote.modifiedAt
                 existing.syncVersion = await SyncVersionCounter.shared.next()
                 existing.isRemoteMerge = true
+                do {
+                    try onRemoteWin?()
+                } catch {
+                    modelContext.rollback()
+                    throw error
+                }
                 try modelContext.save()
                 return 1
             }
@@ -1100,6 +1174,12 @@ actor SwiftDataStore {
             model.modifiedAt = remote.modifiedAt
             model.syncVersion = await SyncVersionCounter.shared.next()
             model.isRemoteMerge = true
+            do {
+                try onRemoteWin?()
+            } catch {
+                modelContext.rollback()
+                throw error
+            }
             modelContext.insert(model)
             try modelContext.save()
             return 1
