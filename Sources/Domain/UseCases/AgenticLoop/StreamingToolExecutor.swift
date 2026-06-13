@@ -14,17 +14,17 @@ actor LastActivityTracker {
 enum StreamingToolExecutor {
 
     /// 流式执行的兜底安全超时（秒）。
-    private static let streamingTimeout: TimeInterval = 3600
+    nonisolated private static let streamingTimeout: TimeInterval = 3600
 
     /// 累积输出上限（字节）：超限丢弃头部、保留尾部（最新输出对模型与用户最有价值）。
-    private static let maxAccumulatedBytes = 256 * 1024
+    nonisolated private static let maxAccumulatedBytes = 256 * 1024
 
     /// 截断标记（英文，进入模型上下文，遵循「给 AI 的文案用英文」约定）。
-    private static let truncationMarker =
+    nonisolated private static let truncationMarker =
         "[Output truncated: earlier output dropped, kept most recent portion]\n"
 
     /// 对累积文本应用上限：超限时保留尾部约 cap/4 个字符（字符近似，避免逐字节切 UTF-8）。
-    private static func capAccumulated(_ text: String) -> (text: String, didTruncate: Bool) {
+    nonisolated private static func capAccumulated(_ text: String) -> (text: String, didTruncate: Bool) {
         guard text.utf8.count > maxAccumulatedBytes else { return (text, false) }
         return (String(text.suffix(maxAccumulatedBytes / 4)), true)
     }

@@ -21,7 +21,7 @@ struct BuiltContext: Sendable {
 /// 根据 maxContextTokens 估算 token 预算，标记是否需要触发上下文压缩。
 struct ContextBuilder: Sendable {
     /// 触发压缩的剩余 token 阈值，与 ContextCompactor.compactionThreshold 对齐。
-    static let compactionReserve = 20_000
+    nonisolated static let compactionReserve = 20_000
 
     private let memoryContextProvider: any MemoryContextProvider
     private let tokenEstimator: TokenEstimator
@@ -77,7 +77,7 @@ struct ContextBuilder: Sendable {
     /// 仅估算 systemPrompt + 历史消息的 token 并判定是否需压缩。
     /// 不查询记忆——buildContext 每次调用都会查记忆（buildMemoryContext），
     /// 循环内每轮调用应避免该开销；阈值复用 compactionReserve，与开头判定一致。
-    func estimateCompactionNeed(
+    nonisolated func estimateCompactionNeed(
         systemPrompt: String,
         messages: [Message],
         maxContextTokens: Int
@@ -87,7 +87,7 @@ struct ContextBuilder: Sendable {
     }
 
     /// 估算消息列表的 token 总数（含 toolOutput / reasoningContent）。
-    private func estimateMessagesTokens(_ messages: [Message]) -> Int {
+    nonisolated private func estimateMessagesTokens(_ messages: [Message]) -> Int {
         messages.reduce(0) { total, msg in
             total + tokenEstimator.estimateTokens(for: msg)
         }
