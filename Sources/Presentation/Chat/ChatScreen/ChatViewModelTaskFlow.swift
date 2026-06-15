@@ -155,11 +155,16 @@ extension ChatViewModel {
             } else {
                 self.streamingScrollTrigger &+= 1
             }
-            // 审批展示（互斥保护）
-            if let toolCall = state.pendingToolCall {
-                self.presentConfirmation(toolCall)
-            } else if self.showConfirmation {
-                self.showConfirmation = false
+            // 审批展示（互斥保护）：审批卡片承载预览/建议规则，按 deadline 自动取消由 coordinator 侧驱动。
+            if let request = state.pendingConfirmationRequest {
+                self.pendingConfirmationRequest = request
+                self.pendingToolCall = request.toolCall
+                self.confirmationDeadline = state.confirmationDeadline
+                self.showApprovalCard = true
+            } else if self.showApprovalCard {
+                self.showApprovalCard = false
+                self.pendingConfirmationRequest = nil
+                self.confirmationDeadline = nil
                 self.pendingToolCall = nil
             }
 
@@ -228,21 +233,16 @@ extension ChatViewModel {
         queuedMessageIDs.formIntersection(stillQueuedIDs.union(pendingEnqueueMessageIDs))
     }
 
-    /// 同意当前待审批工具调用。
-    func approveCommand() {
-        showConfirmation = false
+    /// 解析当前待审批工具调用（四态：拒绝 / 仅此一次 / 本会话信任 / 始终允许）。
+    func resolveCommand(_ outcome: CommandApproval) {
+        showApprovalCard = false
+        pendingConfirmationRequest = nil
+        confirmationDeadline = nil
         pendingToolCall = nil
-        taskCoordinator.approveToolCall(for: serverID)
+        taskCoordinator.resolveToolCall(for: serverID, outcome: outcome)
     }
 
-    /// 拒绝当前待审批工具调用。
-    func denyCommand() {
-        showConfirmation = false
-        pendingToolCall = nil
-        taskCoordinator.denyToolCall(for: serverID)
-    }
-
-    /// 显示审批弹窗。
+    /// 显示审批弹窗（兼容旧路径，仅设置基础状态）。
     func presentConfirmation(_ toolCall: ToolCall) {
         pendingToolCall = toolCall
         showConfirmation = true

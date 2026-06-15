@@ -25,6 +25,12 @@ final class ChatViewModel {
     var error: String?
     var pendingToolCall: ToolCall?
     var showConfirmation: Bool = false
+    /// 当前待审批请求（携带预览与建议规则），驱动 ApprovalCardView 渲染。
+    var pendingConfirmationRequest: ConfirmationRequest?
+    /// 审批卡片 sheet 展示状态。
+    var showApprovalCard = false
+    /// needsConfirmation 超时绝对时间戳，供审批卡片显示倒计时。
+    var confirmationDeadline: Date?
     /// 直连模式待审批请求（代理发起；nil 表示无待决审批）。
     var directPermissionRequest: ACPPermissionRequest?
     var isContextCompressing: Bool = false
@@ -383,6 +389,9 @@ final class ChatViewModel {
     /// 清理审批弹窗状态。
     func clearPendingInteractionState() {
         showConfirmation = false
+        showApprovalCard = false
+        pendingConfirmationRequest = nil
+        confirmationDeadline = nil
         pendingToolCall = nil
         directPermissionRequest = nil
     }

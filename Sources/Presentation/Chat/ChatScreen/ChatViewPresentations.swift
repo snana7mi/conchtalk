@@ -11,12 +11,13 @@ extension ChatView {
 
     private func applyAlertPresentations<Content: View>(to content: Content) -> some View {
         content
-            .alert(String(localized: "Confirm Action", bundle: LanguageSettings.currentBundle), isPresented: $viewModel.showConfirmation) {
-                Button(String(localized: "Execute", bundle: LanguageSettings.currentBundle), role: .destructive) { viewModel.approveCommand() }
-                Button(String(localized: "Cancel", bundle: LanguageSettings.currentBundle), role: .cancel) { viewModel.denyCommand() }
-            } message: {
-                if let toolCall = viewModel.pendingToolCall {
-                    Text(viewModel.confirmationMessage(for: toolCall))
+            .sheet(isPresented: $viewModel.showApprovalCard) {
+                if let request = viewModel.pendingConfirmationRequest {
+                    ApprovalCardView(request: request, deadline: viewModel.confirmationDeadline) { outcome in
+                        viewModel.resolveCommand(outcome)
+                    }
+                    // 必须显式选择，避免下滑误关 = 既不批也不拒；到点 auto-deny 由 coordinator 侧 deadline 驱动。
+                    .interactiveDismissDisabled(true)
                 }
             }
             .alert(
