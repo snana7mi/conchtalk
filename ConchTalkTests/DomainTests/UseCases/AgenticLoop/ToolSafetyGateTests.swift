@@ -44,7 +44,7 @@ struct ToolSafetyGateTests {
             arguments: [:],
             sshClient: sshClient,
             permissionLevel: .standard,
-            onConfirmation: { _ in .approved },
+            onConfirmation: { _ in .approvedOnce },
             onOutput: { _ in },
             onAgentEvents: { _ in }
         )
@@ -117,7 +117,7 @@ struct ToolSafetyGateTests {
             permissionLevel: .strict,
             onConfirmation: { _ in
                 confirmationCalled.set(true)
-                return .approved
+                return .approvedOnce
             },
             onOutput: { _ in },
             onAgentEvents: { _ in }
@@ -145,7 +145,7 @@ struct ToolSafetyGateTests {
             permissionLevel: .permissive,
             onConfirmation: { _ in
                 confirmationCalled.set(true)
-                return .approved
+                return .approvedOnce
             },
             onOutput: { _ in },
             onAgentEvents: { _ in }
