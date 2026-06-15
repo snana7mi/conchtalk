@@ -64,4 +64,28 @@ struct ToolSafetyGateApprovalTests {
         let r = await runGate(policy: FakePolicy()) { _ in .denied }
         if case .denied = r {} else { Issue.record("应 denied") }
     }
+
+    @Test("approvedOnce 执行且标记为写操作")
+    func approvedOnce() async {
+        let policy = FakePolicy()
+        let r = await runGate(policy: policy) { _ in .approvedOnce }
+        if case .executed(_, let hadWrite) = r {
+            #expect(hadWrite == true)
+        } else { Issue.record("应执行") }
+        #expect(policy.saved.isEmpty)            // 仅此一次不持久化
+        #expect(policy.sessionMatchers.isEmpty)  // 仅此一次不记会话
+    }
+
+    @Test("approvedForSession 记录会话信任并执行")
+    func approvedForSession() async {
+        let policy = FakePolicy()
+        policy.suggested = ApprovalRule(
+            id: UUID(), serverID: UUID(), toolName: "write_file",
+            matcher: .pathPrefix(prefix: "/a", recursive: false), displayLabel: "/a",
+            createdAt: Date(), modifiedAt: Date())
+        let r = await runGate(policy: policy) { _ in .approvedForSession }
+        #expect(policy.sessionMatchers == [.pathPrefix(prefix: "/a", recursive: false)])
+        #expect(policy.saved.isEmpty)            // 会话信任不持久化
+        if case .executed = r {} else { Issue.record("应执行") }
+    }
 }
