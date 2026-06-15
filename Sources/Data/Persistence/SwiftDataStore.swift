@@ -1053,6 +1053,38 @@ actor SwiftDataStore {
         }
     }
 
+    /// 可同步的授权规则（Codable 线格式，镜像 SyncableMemoryEntry）。
+    struct SyncableApprovalRule: Codable, Sendable {
+        let id: UUID
+        let serverID: UUID
+        let toolName: String
+        let matcherKind: String
+        let tokensJSON: String?
+        let pathPrefix: String?
+        let recursive: Bool
+        let displayLabel: String
+        let createdAt: Date
+        let syncVersion: Int64
+        let modifiedAt: Date
+        let isDeleted: Bool
+        let isRemoteMerge: Bool
+    }
+
+    /// 收集本地变更（syncVersion > since 且非远端合并）；含 tombstone（软删）。
+    func fetchChangedApprovalRules(since syncVersion: Int64, limit: Int) throws -> [SyncableApprovalRule] {
+        let predicate = #Predicate<ApprovalRuleModel> { $0.syncVersion > syncVersion && $0.isRemoteMerge == false }
+        var descriptor = FetchDescriptor(predicate: predicate, sortBy: [SortDescriptor(\.syncVersion)])
+        descriptor.fetchLimit = limit
+        let models = try modelContext.fetch(descriptor)
+        return models.map {
+            SyncableApprovalRule(id: $0.id, serverID: $0.serverID, toolName: $0.toolName,
+                                 matcherKind: $0.matcherKind, tokensJSON: $0.tokensJSON, pathPrefix: $0.pathPrefix,
+                                 recursive: $0.recursive, displayLabel: $0.displayLabel, createdAt: $0.createdAt,
+                                 syncVersion: $0.syncVersion, modifiedAt: $0.modifiedAt,
+                                 isDeleted: $0.isDeleted, isRemoteMerge: $0.isRemoteMerge)
+        }
+    }
+
     /// 可同步的系统画像快照。
     struct SyncableSystemProfile: Codable, Sendable {
         let serverID: UUID; let osInfo: String; let packageManager: String?; let toolsJSON: String
@@ -1333,6 +1365,47 @@ actor SwiftDataStore {
         } else if !remote.isDeleted {
             let model = MemoryEntryModel(id: remote.id, serverID: remote.serverID, content: remote.content,
                                         tags: remote.tags, entities: remote.entities, createdAt: remote.createdAt, source: remote.source)
+            model.modifiedAt = remote.modifiedAt
+            model.syncVersion = await SyncVersionCounter.shared.next()
+            model.isRemoteMerge = true
+            modelContext.insert(model)
+            try modelContext.save()
+            return (merged: 1, conflicts: 0)
+        }
+        return (merged: 0, conflicts: 0)
+    }
+
+    /// 远端合并授权规则（LWW on modifiedAt；远端胜则写入并置 isRemoteMerge=true 防 ping-pong）。
+    func mergeRemoteApprovalRule(_ remote: SyncableApprovalRule) async throws -> (merged: Int, conflicts: Int) {
+        let predicate = #Predicate<ApprovalRuleModel> { $0.id == remote.id }
+        let existing = try modelContext.fetch(FetchDescriptor(predicate: predicate)).first
+
+        if let existing {
+            if remote.modifiedAt > existing.modifiedAt {
+                if remote.isDeleted { existing.isDeleted = true }
+                else {
+                    existing.isDeleted = false
+                    existing.serverID = remote.serverID
+                    existing.toolName = remote.toolName
+                    existing.matcherKind = remote.matcherKind
+                    existing.tokensJSON = remote.tokensJSON
+                    existing.pathPrefix = remote.pathPrefix
+                    existing.recursive = remote.recursive
+                    existing.displayLabel = remote.displayLabel
+                    existing.createdAt = remote.createdAt
+                }
+                existing.modifiedAt = remote.modifiedAt
+                existing.syncVersion = await SyncVersionCounter.shared.next()
+                existing.isRemoteMerge = true
+                try modelContext.save()
+                return (merged: 1, conflicts: 0)
+            }
+        } else if !remote.isDeleted {
+            let model = ApprovalRuleModel(id: remote.id, serverID: remote.serverID, toolName: remote.toolName,
+                                          matcherKind: remote.matcherKind, tokensJSON: remote.tokensJSON,
+                                          pathPrefix: remote.pathPrefix, recursive: remote.recursive,
+                                          displayLabel: remote.displayLabel, createdAt: remote.createdAt)
+            model.isDeleted = remote.isDeleted
             model.modifiedAt = remote.modifiedAt
             model.syncVersion = await SyncVersionCounter.shared.next()
             model.isRemoteMerge = true
