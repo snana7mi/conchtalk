@@ -33,7 +33,11 @@ struct ChatView: View {
         .navigationTitle("")
         .navigationDestination(isPresented: $showServerInfo) {
             if let client: SSHClientProtocol = viewModel.sshManager.getClient(for: viewModel.serverID) {
-                ServerInfoView(server: viewModel.server, sshClient: client)
+                ServerInfoView(
+                    server: viewModel.server,
+                    sshClient: client,
+                    approvalPolicyStore: viewModel.approvalPolicyStore
+                )
             } else {
                 ContentUnavailableView(
                     String(localized: "Disconnected", bundle: LanguageSettings.currentBundle),

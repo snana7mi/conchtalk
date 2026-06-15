@@ -87,7 +87,8 @@ enum ChatViewModelTestSupport {
             memoryReader: memoryService,
             retainService: retainService,
             speechCoordinator: resolvedSpeechCoordinator,
-            authService: MockAuthService()
+            authService: MockAuthService(),
+            approvalPolicyStore: ApprovalPolicyStore(store: store)
         )
     }
 }

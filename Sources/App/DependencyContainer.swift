@@ -220,7 +220,8 @@ final class DependencyContainer {
             memoryReader: memoryService,
             retainService: retainService,
             speechCoordinator: SpeechInputCoordinator(speechRecognitionService: speechRecognitionService),
-            authService: authService
+            authService: authService,
+            approvalPolicyStore: approvalPolicyStore
         )
         chatViewModelCache[server.id] = vm
         return vm

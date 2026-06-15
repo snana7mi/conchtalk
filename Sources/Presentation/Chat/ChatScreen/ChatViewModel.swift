@@ -126,9 +126,11 @@ final class ChatViewModel {
     private let retainService: RetainService
     let speechCoordinator: SpeechInputCoordinator
     let authService: AuthServiceProtocol
+    /// 授权策略仓储（供服务器信息页的 Trusted Actions 管理使用）。
+    let approvalPolicyStore: ApprovalPolicyStore
 
     /// 初始化聊天视图模型并注入业务依赖。
-    init(server: Server, store: SwiftDataStore, sshManager: SSHSessionManager, aiService: AIServiceProtocol, toolRegistry: ToolRegistryProtocol, keychainService: KeychainServiceProtocol, taskCoordinator: TaskExecutionCoordinator, memoryReader: MemoryReader, retainService: RetainService, speechCoordinator: SpeechInputCoordinator, authService: AuthServiceProtocol) {
+    init(server: Server, store: SwiftDataStore, sshManager: SSHSessionManager, aiService: AIServiceProtocol, toolRegistry: ToolRegistryProtocol, keychainService: KeychainServiceProtocol, taskCoordinator: TaskExecutionCoordinator, memoryReader: MemoryReader, retainService: RetainService, speechCoordinator: SpeechInputCoordinator, authService: AuthServiceProtocol, approvalPolicyStore: ApprovalPolicyStore) {
         self.server = server
         self.store = store
         self.sshManager = sshManager
@@ -140,6 +142,7 @@ final class ChatViewModel {
         self.retainService = retainService
         self.speechCoordinator = speechCoordinator
         self.authService = authService
+        self.approvalPolicyStore = approvalPolicyStore
         let iconData = FlagImageRenderer.resolveServerIconData(server: server, size: 300)
         self.serverIconData = iconData
         self.serverIconImage = iconData.flatMap { ImageUtils.makeSwiftUIImage(from: $0) }
