@@ -31,6 +31,9 @@ final class DependencyContainer {
     let syncService: SyncService
     let subscriptionService: SubscriptionService
 
+    /// 授权策略存储（具体类型，供 Trusted Actions UI 读取/撤销规则）。
+    let approvalPolicyStore: ApprovalPolicyStore
+
     // MARK: - 新架构协调器
 
     /// 任务执行协调器（编排 AI 任务的排队、执行、审批、生命周期）。
@@ -163,13 +166,20 @@ final class DependencyContainer {
         let notifSvc = notificationService
         let swiftDataStore = store
 
+        // 授权策略 + 预览：真实实现，供安全门按服务器查规则/记忆/预览写操作。
+        let approvalPolicyStore = ApprovalPolicyStore(store: swiftDataStore)
+        let approvalPreviewBuilder = ApprovalPreviewBuilder()
+        self.approvalPolicyStore = approvalPolicyStore
+
         let contextFactory = TaskExecutionContextFactory(
             sshManager: sshMgr,
             toolRegistry: toolRegistry,
             memoryContextProvider: memorySvc,
             authService: authSvc,
             memoryService: memorySvc,
-            store: swiftDataStore
+            store: swiftDataStore,
+            approvalPolicyStore: approvalPolicyStore,
+            approvalPreviewBuilder: approvalPreviewBuilder
         )
 
         let messageRepository = ChatMessageRepository(store: swiftDataStore)
