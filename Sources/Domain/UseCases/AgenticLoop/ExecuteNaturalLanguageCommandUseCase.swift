@@ -28,6 +28,12 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     /// agentic loop 最大迭代轮数（默认 50；子 agent 注入更小值以更快收敛）。
     private let maxIterations: Int
 
+    /// 授权策略协作者：确认前查询自动放行、提供最窄建议规则、持久化/会话信任。
+    /// - Note: 默认 `NoOpApprovalPolicy`（永远弹窗、不记忆），生产环境注入真实 `ApprovalPolicyStore`。
+    let approvalPolicyStore: ApprovalPolicyProviding
+    /// 写操作预览协作者：确认前构建 Diff/影响预览。
+    let approvalPreviewBuilder: ApprovalPreviewProviding
+
     /// 上下文组装器（可选）：组装 system prompt + 记忆 + 历史消息，估算 token 并标记是否需要压缩。
     var contextBuilder: ContextBuilder?
     /// 上下文压缩器（可选）：Memory Flush + 摘要生成，在 token 接近上限时裁剪历史。
@@ -37,7 +43,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
 
     /// 工具调用需要用户确认时触发（通常用于危险操作二次确认）。
     /// - Note: 未设置时默认按拒绝处理。
-    var onToolCallNeedsConfirmation: (@Sendable (ToolCall) async -> CommandApproval)?
+    var onToolCallNeedsConfirmation: (@Sendable (ConfirmationRequest) async -> CommandApproval)?
     /// AI 通过 `suggest_agent_connection` 工具建议连接编码代理时触发。
     /// - Parameter preferredAgent: AI 建议的代理类型（可为 nil）。
     /// - Returns: 用户的选择结果。
@@ -85,7 +91,9 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
         serverID: UUID? = nil,
         permissionLevel: PermissionLevel = .standard,
         localizedTexts: LocalizedTexts = .english,
-        maxIterations: Int = 50
+        maxIterations: Int = 50,
+        approvalPolicyStore: ApprovalPolicyProviding = NoOpApprovalPolicy(),
+        approvalPreviewBuilder: ApprovalPreviewProviding = ApprovalPreviewBuilder()
     ) {
         self.aiService = aiService
         self.sshClient = sshClient
@@ -94,6 +102,8 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
         self.permissionLevel = permissionLevel
         self.localizedTexts = localizedTexts
         self.maxIterations = maxIterations
+        self.approvalPolicyStore = approvalPolicyStore
+        self.approvalPreviewBuilder = approvalPreviewBuilder
     }
 
     /// 执行自然语言指令主流程。
@@ -207,8 +217,10 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     // strict 模式下 safe 工具也需确认；特殊工具拦截发生在通用 ToolSafetyGate 前，
                     // 因此这里显式应用同一权限映射，避免绕过全局确认策略。
                     if permissionLevel.effectiveSafetyLevel(.safe) == .needsConfirmation {
-                        let approval = await onToolCallNeedsConfirmation?(toolCall) ?? .denied
-                        guard approval == .approved else {
+                        let request = ConfirmationRequest(toolCall: toolCall, preview: nil,
+                                                          suggestedRule: nil, canRemember: false)
+                        let approval = await onToolCallNeedsConfirmation?(request) ?? .denied
+                        guard approval != .denied else {
                             let deniedOutput = "DENIED: User rejected this subagent dispatch. Acknowledge the denial briefly and ask how to proceed."
                             let deniedMsg = Message(
                                 role: .system,
@@ -313,8 +325,11 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     arguments: arguments,
                     sshClient: sshClient,
                     permissionLevel: permissionLevel,
-                    onConfirmation: { [onToolCallNeedsConfirmation] call in
-                        await onToolCallNeedsConfirmation?(call) ?? .denied
+                    serverID: serverID,
+                    policyStore: approvalPolicyStore,
+                    previewBuilder: approvalPreviewBuilder,
+                    onConfirmation: { [onToolCallNeedsConfirmation] request in
+                        await onToolCallNeedsConfirmation?(request) ?? .denied
                     },
                     onOutput: { [onToolOutputUpdate] output in onToolOutputUpdate?(output) },
                     onAgentEvents: { [onAgentStreamEvents] events in onAgentStreamEvents?(events) }

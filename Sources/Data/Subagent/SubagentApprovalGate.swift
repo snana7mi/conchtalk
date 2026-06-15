@@ -13,13 +13,13 @@ actor SubagentApprovalGate {
     /// 串行地把一次确认请求冒泡到父回调。
     /// 在 `await parentCallback` 执行期间持续持有许可，确保父回调不会重叠执行（maxConcurrent == 1）。
     func requestConfirmation(
-        _ call: ToolCall,
-        via parentCallback: @Sendable (ToolCall) async -> CommandApproval
+        _ request: ConfirmationRequest,
+        via parentCallback: @Sendable (ConfirmationRequest) async -> CommandApproval
     ) async -> CommandApproval {
         await acquire()
         // 用 defer 保证无论正常返回还是被取消，许可都会被释放/移交，杜绝闸门死锁。
         defer { release() }
-        return await parentCallback(call)
+        return await parentCallback(request)
     }
 
     /// 获取许可：空闲则直接占用；否则把自己挂入 FIFO 队列等待被唤醒。

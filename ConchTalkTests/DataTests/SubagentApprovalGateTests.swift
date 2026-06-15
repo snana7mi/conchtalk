@@ -20,17 +20,18 @@ struct SubagentApprovalGateTests {
         let gate = SubagentApprovalGate()
         let detector = OverlapDetector()
 
-        let parentCallback: @Sendable (ToolCall) async -> CommandApproval = { call in
-            await detector.enter(call.id)
+        let parentCallback: @Sendable (ConfirmationRequest) async -> CommandApproval = { request in
+            await detector.enter(request.toolCall.id)
             try? await Task.sleep(for: .milliseconds(20))
             await detector.leave()
-            return .approved
+            return .approvedOnce
         }
 
         await withTaskGroup(of: CommandApproval.self) { group in
             for i in 0..<5 {
                 let call = TestFixtures.makeToolCall(id: "c\(i)", toolName: "execute_ssh_command", arguments: [:])
-                group.addTask { await gate.requestConfirmation(call, via: parentCallback) }
+                let request = ConfirmationRequest(toolCall: call, preview: nil, suggestedRule: nil, canRemember: false)
+                group.addTask { await gate.requestConfirmation(request, via: parentCallback) }
             }
             for await _ in group {}
         }
@@ -45,7 +46,8 @@ struct SubagentApprovalGateTests {
     func passesResult() async {
         let gate = SubagentApprovalGate()
         let call = TestFixtures.makeToolCall(id: "x", toolName: "execute_ssh_command", arguments: [:])
-        let result = await gate.requestConfirmation(call, via: { _ in .denied })
+        let request = ConfirmationRequest(toolCall: call, preview: nil, suggestedRule: nil, canRemember: false)
+        let result = await gate.requestConfirmation(request, via: { _ in .denied })
         #expect(result == .denied)
     }
 }

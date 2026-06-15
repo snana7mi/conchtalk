@@ -15,7 +15,11 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
     private let permissionLevel: PermissionLevel
     private let serverContext: String
     private let approvalGate: SubagentApprovalGate
-    private let parentConfirm: @Sendable (ToolCall) async -> CommandApproval
+    private let parentConfirm: @Sendable (ConfirmationRequest) async -> CommandApproval
+    /// 授权策略协作者（透传给子 UseCase，使子 agent 与主循环共用同一规则/会话信任）。
+    private let approvalPolicyStore: ApprovalPolicyProviding
+    /// 写操作预览协作者（透传给子 UseCase）。
+    private let approvalPreviewBuilder: ApprovalPreviewProviding
     /// 同时运行的子 agent 上限（至少 1）。
     private let maxConcurrent: Int
     /// 子循环的最大迭代轮数（比主循环更小，更快收敛）。
@@ -43,7 +47,9 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
         permissionLevel: PermissionLevel,
         serverContext: String,
         approvalGate: SubagentApprovalGate,
-        parentConfirm: @escaping @Sendable (ToolCall) async -> CommandApproval,
+        parentConfirm: @escaping @Sendable (ConfirmationRequest) async -> CommandApproval,
+        approvalPolicyStore: ApprovalPolicyProviding = NoOpApprovalPolicy(),
+        approvalPreviewBuilder: ApprovalPreviewProviding = ApprovalPreviewBuilder(),
         maxConcurrent: Int = 2,
         subMaxIterations: Int = 25
     ) {
@@ -56,6 +62,8 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
         self.serverContext = serverContext
         self.approvalGate = approvalGate
         self.parentConfirm = parentConfirm
+        self.approvalPolicyStore = approvalPolicyStore
+        self.approvalPreviewBuilder = approvalPreviewBuilder
         self.maxConcurrent = max(1, maxConcurrent)
         self.subMaxIterations = subMaxIterations
     }
@@ -117,11 +125,13 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
             toolRegistry: restricted,
             serverID: serverID,
             permissionLevel: permissionLevel,
-            maxIterations: subMaxIterations
+            maxIterations: subMaxIterations,
+            approvalPolicyStore: approvalPolicyStore,
+            approvalPreviewBuilder: approvalPreviewBuilder
         )
         // 确认请求经串行闸冒泡到父回调，避免并行子 agent 的确认互相覆盖。
-        sub.onToolCallNeedsConfirmation = { [approvalGate, parentConfirm] call in
-            await approvalGate.requestConfirmation(call, via: parentConfirm)
+        sub.onToolCallNeedsConfirmation = { [approvalGate, parentConfirm] request in
+            await approvalGate.requestConfirmation(request, via: parentConfirm)
         }
 
         // 角色 systemPrompt 注入：拼在 serverContext 之前，作为子 UseCase 的上下文。

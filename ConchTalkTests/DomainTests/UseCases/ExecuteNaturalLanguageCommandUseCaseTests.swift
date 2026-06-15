@@ -251,7 +251,7 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
         )
         toolRegistry.register(mockTool)
 
-        useCase.onToolCallNeedsConfirmation = { _ in .approved }
+        useCase.onToolCallNeedsConfirmation = { _ in .approvedOnce }
 
         let toolCall = TestFixtures.makeToolCall(
             id: "call_2",
@@ -395,7 +395,7 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
         let confirmationCalled = LockedBox(false)
         useCase.onToolCallNeedsConfirmation = { _ in
             confirmationCalled.set(true)
-            return .approved
+            return .approvedOnce
         }
 
         let toolCall = TestFixtures.makeToolCall(
@@ -468,7 +468,7 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
         let confirmationCalled = LockedBox(false)
         useCase.onToolCallNeedsConfirmation = { _ in
             confirmationCalled.set(true)
-            return .approved
+            return .approvedOnce
         }
 
         let toolCall = TestFixtures.makeToolCall(
