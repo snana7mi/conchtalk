@@ -53,6 +53,7 @@ final class DependencyContainer {
                 MemoryModel.self,
                 MemoryEntryModel.self,
                 SystemProfileModel.self,
+                ApprovalRuleModel.self,
             ])
             let modelConfiguration = ModelConfiguration(
                 schema: schema,

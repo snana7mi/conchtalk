@@ -617,6 +617,67 @@ actor SwiftDataStore {
         return try modelContext.fetchCount(descriptor)
     }
 
+    // MARK: - Approval Rules
+
+    /// 保存授权规则（幂等：已存在则更新内容并恢复软删；否则新插）。
+    func addApprovalRule(_ rule: ApprovalRule) async throws {
+        let id = rule.id
+        let existing = try modelContext.fetch(
+            FetchDescriptor<ApprovalRuleModel>(predicate: #Predicate { $0.id == id })
+        )
+        let version = await SyncVersionCounter.shared.next()
+        if let model = existing.first {
+            // 恢复软删 + 更新内容
+            model.toolName = rule.toolName
+            let src = ApprovalRuleModel.fromDomain(rule)
+            model.matcherKind = src.matcherKind
+            model.tokensJSON = src.tokensJSON
+            model.pathPrefix = src.pathPrefix
+            model.recursive = src.recursive
+            model.displayLabel = rule.displayLabel
+            model.isDeleted = false
+            model.syncVersion = version
+            model.modifiedAt = Date()
+            model.isRemoteMerge = false
+        } else {
+            let model = ApprovalRuleModel.fromDomain(rule)
+            model.syncVersion = version
+            model.modifiedAt = Date()
+            model.isRemoteMerge = false
+            modelContext.insert(model)
+        }
+        try modelContext.save()
+    }
+
+    /// 别名以对齐 protocol 期望命名（save）。
+    func saveApprovalRule(_ rule: ApprovalRule) async throws { try await addApprovalRule(rule) }
+
+    /// 读取某服务器全部未删规则。
+    func fetchApprovalRules(forServer serverID: UUID) throws -> [ApprovalRule] {
+        let sid = serverID
+        let models = try modelContext.fetch(
+            FetchDescriptor<ApprovalRuleModel>(
+                predicate: #Predicate { $0.serverID == sid && $0.isDeleted == false },
+                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+            )
+        )
+        return models.compactMap { $0.toDomain() }
+    }
+
+    /// 软删除单条规则（撤销）。
+    func deleteApprovalRule(_ ruleID: UUID) async throws {
+        let id = ruleID
+        let models = try modelContext.fetch(
+            FetchDescriptor<ApprovalRuleModel>(predicate: #Predicate { $0.id == id && $0.isDeleted == false })
+        )
+        guard let model = models.first else { return }
+        model.isDeleted = true
+        model.syncVersion = await SyncVersionCounter.shared.next()
+        model.modifiedAt = Date()
+        model.isRemoteMerge = false
+        try modelContext.save()
+    }
+
     // MARK: - SystemProfile Operations
 
     /// 按 serverID 查询系统环境探测结果。
