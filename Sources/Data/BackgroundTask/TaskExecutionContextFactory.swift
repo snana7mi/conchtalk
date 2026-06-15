@@ -16,13 +16,20 @@ struct TaskExecutionContextFactory {
     private let memoryService: MemoryService?
     private let store: SwiftDataStore
 
+    /// 授权策略协作者（传递给任务级 ExecuteNaturalLanguageCommandUseCase / SubagentRunner）。
+    let approvalPolicyStore: ApprovalPolicyProviding
+    /// 写操作预览协作者（同上）。
+    let approvalPreviewBuilder: ApprovalPreviewProviding
+
     init(
         sshManager: SSHSessionManager,
         toolRegistry: ToolRegistryProtocol,
         memoryContextProvider: MemoryContextProvider,
         authService: AuthServiceProtocol,
         memoryService: MemoryService?,
-        store: SwiftDataStore
+        store: SwiftDataStore,
+        approvalPolicyStore: ApprovalPolicyProviding = NoOpApprovalPolicy(),
+        approvalPreviewBuilder: ApprovalPreviewProviding = ApprovalPreviewBuilder()
     ) {
         self.sshManager = sshManager
         self.toolRegistry = toolRegistry
@@ -30,6 +37,8 @@ struct TaskExecutionContextFactory {
         self.authService = authService
         self.memoryService = memoryService
         self.store = store
+        self.approvalPolicyStore = approvalPolicyStore
+        self.approvalPreviewBuilder = approvalPreviewBuilder
     }
 
     /// 获取指定服务器的 SSH 客户端。

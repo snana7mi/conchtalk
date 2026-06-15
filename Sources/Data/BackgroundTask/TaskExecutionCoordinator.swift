@@ -192,26 +192,27 @@ final class TaskExecutionCoordinator {
 
     // MARK: - Public API: Approval
 
-    /// 同意当前待审批工具调用。
-    func approveToolCall(for serverID: UUID) {
+    /// 统一的审批结果回传（替代旧 approveToolCall/denyToolCall 的内部逻辑）。
+    /// - Parameter outcome: 四态审批结果（denied / approvedOnce / approvedForSession / approvedAlways）。
+    func resolveToolCall(for serverID: UUID, outcome: CommandApproval) {
         reconcileExpiredApproval(for: serverID)
-        resolveApprovalContinuation(for: serverID, result: .approved)
+        resolveApprovalContinuation(for: serverID, result: outcome)
         stateStore.updateState(for: serverID) {
             $0.pendingToolCall = nil
+            $0.pendingConfirmationRequest = nil
             $0.confirmationDeadline = nil
         }
         notifyStateChange(for: serverID)
     }
 
-    /// 拒绝当前待审批工具调用。
+    /// 同意当前待审批工具调用（薄封装：仅此一次）。
+    func approveToolCall(for serverID: UUID) {
+        resolveToolCall(for: serverID, outcome: .approvedOnce)
+    }
+
+    /// 拒绝当前待审批工具调用（薄封装）。
     func denyToolCall(for serverID: UUID) {
-        reconcileExpiredApproval(for: serverID)
-        resolveApprovalContinuation(for: serverID, result: .denied)
-        stateStore.updateState(for: serverID) {
-            $0.pendingToolCall = nil
-            $0.confirmationDeadline = nil
-        }
-        notifyStateChange(for: serverID)
+        resolveToolCall(for: serverID, outcome: .denied)
     }
 
     /// 外部解决 Agent 连接模式选择。
@@ -341,7 +342,9 @@ final class TaskExecutionCoordinator {
             toolRegistry: effectiveToolRegistry,
             serverID: serverID,
             permissionLevel: effectivePermissionLevel,
-            localizedTexts: localizedTexts
+            localizedTexts: localizedTexts,
+            approvalPolicyStore: contextFactory.approvalPolicyStore,
+            approvalPreviewBuilder: contextFactory.approvalPreviewBuilder
         )
 
         useCase.attachments = attachments
@@ -368,10 +371,12 @@ final class TaskExecutionCoordinator {
             permissionLevel: effectivePermissionLevel,
             serverContext: serverContext,
             approvalGate: subagentApprovalGate,
-            parentConfirm: { [weak self] call in
+            parentConfirm: { [weak self] request in
                 guard let self else { return .denied }
-                return await self.handleToolCallConfirmation(serverID: serverID, toolCall: call)
+                return await self.handleToolCallConfirmation(serverID: serverID, request: request)
             },
+            approvalPolicyStore: contextFactory.approvalPolicyStore,
+            approvalPreviewBuilder: contextFactory.approvalPreviewBuilder,
             maxConcurrent: 2
         )
 
@@ -440,9 +445,9 @@ final class TaskExecutionCoordinator {
         useCase: ExecuteNaturalLanguageCommandUseCase,
         serverID: UUID
     ) {
-        useCase.onToolCallNeedsConfirmation = { [weak self] toolCall in
+        useCase.onToolCallNeedsConfirmation = { [weak self] request in
             guard let self else { return .denied }
-            return await self.handleToolCallConfirmation(serverID: serverID, toolCall: toolCall)
+            return await self.handleToolCallConfirmation(serverID: serverID, request: request)
         }
 
         useCase.onAgentConnectionSuggested = { [weak self] preferredAgent, cwd, directories, homePath in
@@ -526,14 +531,15 @@ final class TaskExecutionCoordinator {
 
     private func handleToolCallConfirmation(
         serverID: UUID,
-        toolCall: ToolCall
+        request: ConfirmationRequest
     ) async -> CommandApproval {
         guard lifecycleManager.hasActiveTask(for: serverID) else { return .denied }
 
-        // 更新 stateStore
+        // 更新 stateStore：同时承载 toolCall 与完整 ConfirmationRequest（预览 + 建议规则）。
         let deadline = Date().addingTimeInterval(Self.defaultApprovalTimeoutSeconds)
         stateStore.updateState(for: serverID) {
-            $0.pendingToolCall = toolCall
+            $0.pendingToolCall = request.toolCall
+            $0.pendingConfirmationRequest = request
             $0.confirmationDeadline = deadline
         }
         notifyStateChange(for: serverID)
@@ -544,6 +550,7 @@ final class TaskExecutionCoordinator {
         // 清理状态
         stateStore.updateState(for: serverID) {
             $0.pendingToolCall = nil
+            $0.pendingConfirmationRequest = nil
             $0.confirmationDeadline = nil
         }
 
@@ -597,6 +604,7 @@ final class TaskExecutionCoordinator {
         resolveApprovalContinuation(for: serverID, result: .denied)
         stateStore.updateState(for: serverID) {
             $0.pendingToolCall = nil
+            $0.pendingConfirmationRequest = nil
             $0.confirmationDeadline = nil
         }
         notifyStateChange(for: serverID)
@@ -614,6 +622,7 @@ final class TaskExecutionCoordinator {
             resolveApprovalContinuation(for: serverID, result: .denied)
             stateStore.updateState(for: serverID) {
                 $0.pendingToolCall = nil
+                $0.pendingConfirmationRequest = nil
                 $0.confirmationDeadline = nil
             }
             resolved = true

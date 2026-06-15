@@ -11,6 +11,8 @@ nonisolated struct TaskStreamingState {
     var isStreaming: Bool = false
     var isReasoningActive: Bool = false
     var pendingToolCall: ToolCall? = nil
+    /// 与 pendingToolCall 并存：承载本次确认的预览/建议规则，供审批卡片渲染。
+    var pendingConfirmationRequest: ConfirmationRequest? = nil
     /// needsConfirmation 超时用绝对时间戳（非 Timer），
     /// App 被挂起后 Timer 不走，恢复时用 deadline 判定是否已过期。
     var confirmationDeadline: Date? = nil
