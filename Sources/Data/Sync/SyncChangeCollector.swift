@@ -127,6 +127,16 @@ actor SyncChangeCollector {
             }))
         }
 
+        let approvalRules = try await store.fetchChangedApprovalRules(since: syncVersion, limit: batchSize)
+        for r in approvalRules {
+            let captured = r
+            all.append((syncVersion: r.syncVersion, build: {
+                SyncChangeEntry(entityType: .approvalRule, entityId: captured.id.uuidString,
+                                jsonData: try encoder.encode(captured),
+                                syncVersion: captured.syncVersion, modifiedAt: isoFormatter.string(from: captured.modifiedAt))
+            }))
+        }
+
         // 按全局 syncVersion 排序，取前 batchSize 条
         all.sort { $0.syncVersion < $1.syncVersion }
         let selected = all.prefix(batchSize)

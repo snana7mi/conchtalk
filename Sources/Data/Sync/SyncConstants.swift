@@ -10,6 +10,7 @@ enum SyncEntityType: String, CaseIterable, Codable, Sendable {
     case memory
     case memoryEntry = "memory_entry"
     case systemProfile = "system_profile"
+    case approvalRule = "approval_rule"
 
     /// 全量恢复时的拉取优先级（数字越小越先拉取）。
     /// ServerGroup 必须在 Server 之前，确保分组关系能正确重建。
@@ -22,6 +23,7 @@ enum SyncEntityType: String, CaseIterable, Codable, Sendable {
         case .memory: 4
         case .memoryEntry: 5
         case .systemProfile: 6
+        case .approvalRule: 7   // 须晚于 server（按 serverID 关联）
         }
     }
 }

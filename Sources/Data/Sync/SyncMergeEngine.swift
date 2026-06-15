@@ -69,6 +69,9 @@ actor SyncMergeEngine {
         case .systemProfile:
             let remote = try decoder.decode(SwiftDataStore.SyncableSystemProfile.self, from: jsonData)
             return try await store.mergeRemoteSystemProfile(remote)
+        case .approvalRule:
+            let remote = try decoder.decode(SwiftDataStore.SyncableApprovalRule.self, from: jsonData)
+            return try await store.mergeRemoteApprovalRule(remote)
         }
     }
 }
