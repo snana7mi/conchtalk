@@ -52,6 +52,9 @@ final class TaskExecutionCoordinator {
     /// subagent 角色注册表（供子 agent 编排器按名查找角色定义）。
     private let subagentRegistry: SubagentRegistry
 
+    /// 远程兑现推送调度器（可选）。I7 在 DI 装配后注入；未注入时所有调用静默跳过。
+    private let pushScheduleCoordinator: PushScheduleCoordinator?
+
     /// App 是否在前台。
     var isAppInForeground: Bool = true
 
@@ -73,7 +76,8 @@ final class TaskExecutionCoordinator {
         contextCompactor: ContextCompactor? = nil,
         keepAlive: BackgroundKeepAlive,
         notificationService: NotificationService,
-        subagentRegistry: SubagentRegistry
+        subagentRegistry: SubagentRegistry,
+        pushScheduleCoordinator: PushScheduleCoordinator? = nil
     ) {
         self.taskQueue = taskQueue
         self.stateStore = stateStore
@@ -86,6 +90,7 @@ final class TaskExecutionCoordinator {
         self.keepAlive = keepAlive
         self.notificationService = notificationService
         self.subagentRegistry = subagentRegistry
+        self.pushScheduleCoordinator = pushScheduleCoordinator
     }
 
     // MARK: - Public API: Background Keep Alive
@@ -203,6 +208,10 @@ final class TaskExecutionCoordinator {
             $0.confirmationDeadline = nil
         }
         notifyStateChange(for: serverID)
+        // 审批已解决：取消该 server 在飞的兑现推送。
+        if let coordinator = pushScheduleCoordinator {
+            Task { await coordinator.checkin(serverID: serverID) }
+        }
     }
 
     /// 同意当前待审批工具调用（薄封装：仅此一次）。
@@ -693,6 +702,12 @@ final class TaskExecutionCoordinator {
                 serverIconData: bgTask.serverIconData,
                 serverID: serverID
             )
+            // App 不在前台时，预约一条兑现推送（回前台/审批解决会 check-in 取消）。
+            if !isAppInForeground, let coordinator = pushScheduleCoordinator {
+                let serverName = bgTask.serverName
+                let body = String(localized: "Operation needs approval", bundle: LanguageSettings.currentBundle)
+                Task { await coordinator.scheduleFallback(serverID: serverID, serverName: serverName, body: body) }
+            }
         }
     }
 
@@ -706,6 +721,11 @@ final class TaskExecutionCoordinator {
         serverName: String,
         serverIconData: Data?
     ) async {
+        // 任务结束：取消该 server 在飞的兑现推送（无待审批则无操作）。
+        if let coordinator = pushScheduleCoordinator {
+            await coordinator.checkin(serverID: serverID)
+        }
+
         // 对话中有写操作时，后台刷新系统 profile
         if hadWriteOperations {
             Task { @MainActor in

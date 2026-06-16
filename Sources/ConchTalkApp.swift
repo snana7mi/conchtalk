@@ -303,6 +303,10 @@ struct ConchTalkApp: App {
             container.taskExecutionCoordinator.isAppInForeground = (newPhase == .active)
             if newPhase == .active {
                 container.taskExecutionCoordinator.onForegroundResume()
+                // 回前台：兜底清理全部在飞的兑现推送（I7 注入后生效）。
+                if let pushCoordinator = container.pushScheduleCoordinator {
+                    Task { await pushCoordinator.checkinAll() }
+                }
                 // 回前台：停止轮询，结束 Live Activity（无活跃 AI 任务时）
                 container.metricsPoller.stop()
                 if container.taskExecutionCoordinator.activeTaskServerIDs.isEmpty {

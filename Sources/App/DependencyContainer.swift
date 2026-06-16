@@ -39,6 +39,9 @@ final class DependencyContainer {
     /// 任务执行协调器（编排 AI 任务的排队、执行、审批、生命周期）。
     let taskExecutionCoordinator: TaskExecutionCoordinator
 
+    /// 远程兑现推送调度器（可选）。I7 在 DI 装配后注入；未注入时生命周期 check-in 静默跳过。
+    var pushScheduleCoordinator: PushScheduleCoordinator?
+
     /// 异步工厂方法：将重量级 I/O（ModelContainer、Skill 文件加载）移到后台线程，
     /// 避免阻塞主线程导致首帧卡顿。
     static func create() async -> DependencyContainer {
