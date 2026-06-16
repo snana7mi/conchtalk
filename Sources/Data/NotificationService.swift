@@ -19,6 +19,12 @@ final class NotificationService: NSObject, @unchecked Sendable {
 
     private static let categoryApproval = "AI_APPROVAL"
     private static let categoryReply = "AI_REPLY"
+    private static let actionApproveOnce = "APPROVE_ONCE"
+    private static let actionDeny = "DENY"
+
+    /// 本地审批通知动作回调（App 存活时连四态审批）。
+    @ObservationIgnored
+    var onNotificationApproval: (@MainActor (UUID, CommandApproval) -> Void)?
 
     override init() {
         super.init()
@@ -26,9 +32,19 @@ final class NotificationService: NSObject, @unchecked Sendable {
         center.delegate = self
 
         // 注册通知类别
+        let approve = UNNotificationAction(
+            identifier: Self.actionApproveOnce,
+            title: String(localized: "Approve Once", bundle: LanguageSettings.currentBundle),
+            options: [.authenticationRequired]
+        )
+        let deny = UNNotificationAction(
+            identifier: Self.actionDeny,
+            title: String(localized: "Deny", bundle: LanguageSettings.currentBundle),
+            options: [.destructive]
+        )
         let approvalCategory = UNNotificationCategory(
             identifier: Self.categoryApproval,
-            actions: [],
+            actions: [approve, deny],
             intentIdentifiers: [NSStringFromClass(INSendMessageIntent.self)]
         )
         let replyCategory = UNNotificationCategory(
@@ -155,6 +171,19 @@ final class NotificationService: NSObject, @unchecked Sendable {
         }
     }
 
+    /// 处理通知动作：approve/deny 且仍有待审批 → 回调；否则深链。
+    func handleAction(actionIdentifier: String, userInfo: [AnyHashable: Any],
+                      hasPendingApproval: (UUID) -> Bool) async {
+        guard let nav = Self.parseNavigation(from: userInfo) else { return }
+        if (actionIdentifier == Self.actionApproveOnce || actionIdentifier == Self.actionDeny),
+           hasPendingApproval(nav.serverID) {
+            let outcome: CommandApproval = actionIdentifier == Self.actionApproveOnce ? .approvedOnce : .denied
+            await MainActor.run { self.onNotificationApproval?(nav.serverID, outcome) }
+        } else {
+            await MainActor.run { self.pendingNavigation = nav }
+        }
+    }
+
     /// 解析通知的 userInfo 为导航目标。
     static func parseNavigation(from userInfo: [AnyHashable: Any]) -> NotificationNavigation? {
         guard let serverStr = userInfo["serverID"] as? String,
@@ -176,16 +205,19 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         [.banner, .sound]
     }
 
-    /// 用户点击通知后触发导航。
+    /// 用户点击通知或选择动作后转交 handleAction。
+    /// `hasPendingApproval` 的真实判定由装配方（DI）经 onNotificationApproval 注入；
+    /// 在 I7 接线前默认 false，动作降级为深链导航，保持既有行为。
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo
-        if let nav = Self.parseNavigation(from: userInfo) {
-            await MainActor.run {
-                self.pendingNavigation = nav
-            }
-        }
+        let hasPending = onNotificationApproval != nil
+        await handleAction(
+            actionIdentifier: response.actionIdentifier,
+            userInfo: userInfo,
+            hasPendingApproval: { _ in hasPending }
+        )
     }
 }
