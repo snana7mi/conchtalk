@@ -80,6 +80,10 @@ struct ConchTalkApp: App {
         }
         .task {
             let c = await DependencyContainer.create()
+            #if os(iOS)
+            // 容器就绪后注入：AppDelegate 的 APNs token 回调转交 PushRegistrationService。
+            AppDelegate.pushRegistration = c.pushRegistration
+            #endif
             container = c
         }
     }
@@ -222,6 +226,8 @@ struct ConchTalkApp: App {
             // 满足 SecItemUpdate 重新加密的前置条件）
             container.keychainService.migrateCredentialAccessibilityIfNeeded()
             container.notificationService.requestAuthorization()
+            // 通知授权请求后向系统注册远程通知；APNs token 经 AppDelegate 回 PushRegistrationService 上传。
+            container.pushRegistration.registerForRemoteNotifications()
             // 冷启动恢复：已登录用户拉取最新 tier（重装后 UserDefaults 丢失，依赖此处刷新）
             let wasLoggedInAtLaunch = container.authService.isLoggedIn
             print("[App] Launch: isLoggedIn=\(wasLoggedInAtLaunch), syncEnabled=\(SyncState.isEnabled)")

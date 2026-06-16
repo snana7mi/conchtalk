@@ -39,7 +39,15 @@ final class DependencyContainer {
     /// 任务执行协调器（编排 AI 任务的排队、执行、审批、生命周期）。
     let taskExecutionCoordinator: TaskExecutionCoordinator
 
-    /// 远程兑现推送调度器（可选）。I7 在 DI 装配后注入；未注入时生命周期 check-in 静默跳过。
+    // MARK: - 远程推送（APNs 兑现推送）
+
+    /// Push HTTP 客户端，对接托管后端 /push/*（鉴权复用 AuthService）。
+    let pushAPIClient: PushAPIClient
+
+    /// 远程通知注册服务（token hex/上传 + 稳定 installID）。
+    let pushRegistration: PushRegistrationService
+
+    /// 远程兑现推送调度器。在 init 内装配并注入 TaskExecutionCoordinator。
     var pushScheduleCoordinator: PushScheduleCoordinator?
 
     /// 异步工厂方法：将重量级 I/O（ModelContainer、Skill 文件加载）移到后台线程，
@@ -187,6 +195,15 @@ final class DependencyContainer {
 
         let messageRepository = ChatMessageRepository(store: swiftDataStore)
 
+        // 远程推送服务装配：PushAPIClient 复用 AuthService 的 Bearer JWT；
+        // PushScheduleCoordinator 在此创建并注入 TaskExecutionCoordinator，
+        // 以便后台待审批时预约兑现推送、回前台/审批解决时 check-in 取消。
+        let pushClient = PushAPIClient(tokenProvider: { try await authSvc.validAccessToken() })
+        self.pushAPIClient = pushClient
+        self.pushRegistration = PushRegistrationService(api: pushClient)
+        let pushCoordinator = PushScheduleCoordinator(api: pushClient)
+        self.pushScheduleCoordinator = pushCoordinator
+
         let tec = TaskExecutionCoordinator(
             taskQueue: PerServerTaskQueue(),
             stateStore: TaskStreamingStateStore(),
@@ -198,9 +215,15 @@ final class DependencyContainer {
             contextCompactor: ctxCompactor,
             keepAlive: BackgroundKeepAlive(),
             notificationService: notifSvc,
-            subagentRegistry: subagentRegistry
+            subagentRegistry: subagentRegistry,
+            pushScheduleCoordinator: pushCoordinator
         )
         self.taskExecutionCoordinator = tec
+
+        // 本地审批通知动作（App 存活时）→ 直接解析四态审批结果。
+        notifSvc.onNotificationApproval = { serverID, outcome in
+            tec.resolveToolCall(for: serverID, outcome: outcome)
+        }
     }
 
     /// chatViewModelCache：按 server ID 缓存 ChatViewModel，返回时保持直连模式等状态。
