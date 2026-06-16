@@ -25,6 +25,9 @@ enum ConnectionGatewayState: Equatable {
 /// ConchTalkApp：应用入口与全局导航的组装点。
 @main
 struct ConchTalkApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
     @State private var container: DependencyContainer?
     @State private var selectedServer: Server?
     @State private var selectedLanguage = LanguageSettings.load().language
