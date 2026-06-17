@@ -17,6 +17,7 @@ struct ProfileView: View {
     @State private var usageInfo: UsageInfo?
     @State private var showDeleteConfirmation = false
     @State private var authError: String?
+    @State private var showEditName = false
 
     var body: some View {
         Form {
@@ -56,6 +57,9 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showPaywall) {
             PaywallView(viewModel: PaywallViewModel(subscriptionService: subscriptionService))
+        }
+        .sheet(isPresented: $showEditName) {
+            EditDisplayNameView(authService: authService)
         }
     }
 
@@ -133,6 +137,22 @@ struct ProfileView: View {
                             .controlSize(.mini)
                         }
                     }
+                }
+
+                Button {
+                    showEditName = true
+                } label: {
+                    LabeledContent(String(localized: "Nickname", bundle: LanguageSettings.currentBundle)) {
+                        HStack(spacing: 6) {
+                            Text(user.displayName ?? "").foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .tint(.primary)
+
+                if let memberNo = user.memberNo {
+                    LabeledContent(String(localized: "Conch No.", bundle: LanguageSettings.currentBundle), value: "#\(memberNo)")
                 }
 
             }
