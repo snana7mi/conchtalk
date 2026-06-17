@@ -17,6 +17,7 @@ struct AuthUser: Sendable {
     let tierExpiresAt: String?
     let createdAt: String?
     let avatarURL: String?
+    let memberNo: Int?
 }
 
 struct UsageInfo: Sendable {
@@ -195,7 +196,8 @@ private extension GatewayAccountUser {
             tier: tier,
             tierExpiresAt: tierExpiresAt,
             createdAt: createdAt,
-            avatarURL: avatarURL
+            avatarURL: avatarURL,
+            memberNo: memberNo
         )
     }
 }
@@ -209,7 +211,8 @@ private extension AuthUser {
             tier: tier,
             tierExpiresAt: tierExpiresAt,
             createdAt: createdAt,
-            avatarURL: avatarURL
+            avatarURL: avatarURL,
+            memberNo: memberNo
         )
     }
 }
