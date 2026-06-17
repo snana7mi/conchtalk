@@ -760,10 +760,10 @@
 		};
 		24B1C0052F630000000ACP03 /* XCRemoteSwiftPackageReference "swift-acp" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/wiedymi/swift-acp.git";
+			repositoryURL = "https://github.com/snana7mi/swift-acp.git";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = revision;
+				revision = 1324d301ca89926191adfee502dee778a863db9d;
 			};
 		};
 		24D38EDC2F7E3FB300C97364 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
