@@ -126,6 +126,11 @@ final class AuthService: AuthServiceProtocol {
         syncFromGateway()
     }
 
+    func updateDisplayName(_ name: String) async throws {
+        try await gateway.updateDisplayName(name)
+        syncFromGateway()
+    }
+
     func updateCurrentUser(_ user: AuthUser) {
         currentUser = user
         gateway.updateCurrentUser(user.asGatewayAccountUser)
