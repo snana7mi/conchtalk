@@ -2,7 +2,6 @@
 import Testing
 @testable import ConchTalk
 import Foundation
-import Speech
 
 @MainActor
 struct SpeechRecognitionServiceTests {
@@ -20,11 +19,9 @@ struct SpeechRecognitionServiceTests {
         #expect(config.maxDuration == 60)
     }
 
-    @Test func isAvailableReflectsRecognizerAvailability() {
-        let permissionManager = AudioPermissionManager()
-        let service = SpeechRecognitionService(permissionManager: permissionManager)
-        #expect(service.isAvailable == (SFSpeechRecognizer()?.isAvailable == true))
-    }
+    // 移除了 isAvailableReflectsRecognizerAvailability：它断言两个独立 SFSpeechRecognizer()
+    // 实例的 .isAvailable 相等，而该属性异步 settle、逐实例竞态 → 重言式且天生 flaky，测不出真实逻辑。
+    // 如需确定性测可用性，应把 recognizer 改为可注入再 stub。
 
     @Test func cancelListeningResetsToIdle() async {
         let permissionManager = AudioPermissionManager()
