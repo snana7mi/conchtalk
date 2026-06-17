@@ -779,7 +779,7 @@
 			repositoryURL = "https://github.com/snana7mi/LLMGatewayKit.git";
 			requirement = {
 				kind = exactVersion;
-				version = 0.1.2;
+				version = 0.2.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
