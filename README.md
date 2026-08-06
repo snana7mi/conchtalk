@@ -8,9 +8,9 @@ It is designed for natural-language-driven work such as server operations, file 
 
 ConchTalk is fully bring-your-own-service and has no ConchTalk-operated backend. There is no ConchTalk account or sign-in, subscription or billing system, managed AI/search gateway, request relay, or cloud sync. You configure your own AI endpoint, API key, and model, and regular AI requests are sent directly from the app to that provider.
 
-## Try It on TestFlight
+## Download on the App Store
 
-- TestFlight: https://testflight.apple.com/join/h4FAQ17v
+- App Store: https://apps.apple.com/app/conchtalk/id6759644121
 
 ## Highlights
 

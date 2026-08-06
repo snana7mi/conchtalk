@@ -8,9 +8,9 @@ ConchTalk 是一个运行在 iOS 上的 AI 个人助手应用。它通过 SSH �
 
 ConchTalk 完全采用用户自有服务路线，不运营任何 ConchTalk 后端：不包含 ConchTalk 账号或登录、订阅或计费系统、托管的 AI/搜索网关、请求中继或云同步。用户必须配置自己的 AI endpoint、API key 和 model，普通 AI 请求由 App 直接发送给用户选择的服务商。
 
-## TestFlight 体验
+## App Store 下载
 
-- TestFlight 链接：https://testflight.apple.com/join/h4FAQ17v
+- App Store：https://apps.apple.com/app/conchtalk/id6759644121
 
 ## 核心特性
 
