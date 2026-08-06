@@ -20,7 +20,7 @@ struct Skill: Sendable {
     let directoryURL: URL?
 
     /// 用户可见的显示名称，优先取 metadata["displayName"]，否则回退到 name
-    var displayName: String {
+    nonisolated var displayName: String {
         metadata["displayName"] ?? name
     }
 }
