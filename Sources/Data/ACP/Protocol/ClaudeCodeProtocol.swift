@@ -241,44 +241,88 @@ nonisolated struct ClaudeCodeUserMessage: Encodable, Sendable {
     }
 }
 
-/// ClaudeCodeControlResponse：权限请求的回复。
+/// ClaudeCodeControlResponse：CLI 发来的 control_request 的回复。
+/// 线格式与官方 claude-agent-sdk-python `_internal/query.py` 一致：
+/// - 成功：`{"type":"control_response","response":{"subtype":"success","request_id":…,"response":{…}}}`
+/// - 失败：`{"type":"control_response","response":{"subtype":"error","request_id":…,"error":"…"}}`
 nonisolated struct ClaudeCodeControlResponse: Encodable, Sendable {
     let type = "control_response"
     let response: ResponsePayload
 
     nonisolated struct ResponsePayload: Encodable, Sendable {
-        let subtype = "success"
+        let subtype: String
         let requestId: String
-        let response: BehaviorPayload
+        let response: BehaviorPayload?
+        let error: String?
 
         private enum CodingKeys: String, CodingKey {
             case subtype
             case requestId = "request_id"
             case response
+            case error
         }
     }
 
+    /// can_use_tool 的决定。allow 时官方 SDK 总是回传 updatedInput（未修改则为原始 input）。
     nonisolated struct BehaviorPayload: Encodable, Sendable {
         let behavior: String
         let message: String?
+        let updatedInput: [String: AnyCodableJSON]?
 
-        init(behavior: String, message: String? = nil) {
+        init(behavior: String, message: String? = nil, updatedInput: [String: AnyCodableJSON]? = nil) {
             self.behavior = behavior
             self.message = message
+            self.updatedInput = updatedInput
         }
     }
 
-    static func allow(requestId: String) -> ClaudeCodeControlResponse {
+    static func allow(requestId: String, input: [String: AnyCodableJSON]? = nil) -> ClaudeCodeControlResponse {
         ClaudeCodeControlResponse(response: ResponsePayload(
+            subtype: "success",
             requestId: requestId,
-            response: BehaviorPayload(behavior: "allow")
+            response: BehaviorPayload(behavior: "allow", updatedInput: input ?? [:]),
+            error: nil
         ))
     }
 
     static func deny(requestId: String, message: String) -> ClaudeCodeControlResponse {
         ClaudeCodeControlResponse(response: ResponsePayload(
+            subtype: "success",
             requestId: requestId,
-            response: BehaviorPayload(behavior: "deny", message: message)
+            response: BehaviorPayload(behavior: "deny", message: message),
+            error: nil
         ))
+    }
+
+    /// 不支持的 control_request 子类型：回复 error，避免 CLI 一直等待。
+    static func error(requestId: String, message: String) -> ClaudeCodeControlResponse {
+        ClaudeCodeControlResponse(response: ResponsePayload(
+            subtype: "error",
+            requestId: requestId,
+            response: nil,
+            error: message
+        ))
+    }
+}
+
+/// ClaudeCodeControlRequestMessage：客户端发给 CLI 的 control_request（如中断当前轮）。
+/// 与官方 SDK `Query.interrupt()` 一致：`{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}`。
+nonisolated struct ClaudeCodeControlRequestMessage: Encodable, Sendable {
+    let type = "control_request"
+    let requestId: String
+    let request: Payload
+
+    nonisolated struct Payload: Encodable, Sendable {
+        let subtype: String
+    }
+
+    static func interrupt(requestId: String) -> ClaudeCodeControlRequestMessage {
+        ClaudeCodeControlRequestMessage(requestId: requestId, request: Payload(subtype: "interrupt"))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case requestId = "request_id"
+        case request
     }
 }

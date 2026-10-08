@@ -115,4 +115,51 @@ struct ClaudeCodeProtocolTests {
         #expect(json.contains("deny"))
         #expect(json.contains("User denied"))
     }
+
+    @Test("allow 回传原始 input 作为 updatedInput（与官方 SDK 一致）")
+    func encodeControlResponseAllowEchoesInput() throws {
+        let response = ClaudeCodeControlResponse.allow(
+            requestId: "req_2",
+            input: ["command": .string("ls -la")]
+        )
+        let data = try JSONEncoder().encode(response)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["type"] as? String == "control_response")
+        let payload = try #require(json["response"] as? [String: Any])
+        #expect(payload["subtype"] as? String == "success")
+        #expect(payload["request_id"] as? String == "req_2")
+        let decision = try #require(payload["response"] as? [String: Any])
+        #expect(decision["behavior"] as? String == "allow")
+        #expect((decision["updatedInput"] as? [String: Any])?["command"] as? String == "ls -la")
+    }
+
+    @Test("不支持的 control_request 回复 error 子类型")
+    func encodeControlResponseError() throws {
+        let response = ClaudeCodeControlResponse.error(requestId: "req_3", message: "Unsupported")
+        let data = try JSONEncoder().encode(response)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let payload = try #require(json["response"] as? [String: Any])
+        #expect(payload["subtype"] as? String == "error")
+        #expect(payload["request_id"] as? String == "req_3")
+        #expect(payload["error"] as? String == "Unsupported")
+        #expect(payload["response"] == nil)
+    }
+
+    @Test("中断使用 control_request(subtype=interrupt)")
+    func encodeInterruptControlRequest() throws {
+        let request = ClaudeCodeControlRequestMessage.interrupt(requestId: "req_9")
+        let data = try JSONEncoder().encode(request)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(json["type"] as? String == "control_request")
+        #expect(json["request_id"] as? String == "req_9")
+        #expect((json["request"] as? [String: Any])?["subtype"] as? String == "interrupt")
+    }
+
+    @Test("启动命令启用 --permission-prompt-tool stdio 并正确转义 cwd")
+    func launchCommandEnablesStdioPermissionPrompt() {
+        let command = ClaudeCodeCommandBuilder.launchCommand(cwd: "/home/o'neil/repo")
+        #expect(command.contains("--permission-prompt-tool stdio"))
+        #expect(command.contains("--input-format stream-json"))
+        #expect(command.contains("o'\\''neil"))
+    }
 }

@@ -267,7 +267,7 @@
 			mainGroup = 240D8B7C2F42F3C800FBFD13;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				240D8B952F42F3C900FBFD13 /* XCRemoteSwiftPackageReference "citadel" */,
+				240D8B952F42F3C900FBFD13 /* XCLocalSwiftPackageReference "Vendor/Citadel" */,
 				24B1C0052F630000000ACP03 /* XCRemoteSwiftPackageReference "swift-acp" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -734,15 +734,14 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		240D8B952F42F3C900FBFD13 /* XCRemoteSwiftPackageReference "citadel" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/orlandos-nl/citadel.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.12.0;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		240D8B952F42F3C900FBFD13 /* XCLocalSwiftPackageReference "Vendor/Citadel" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/Citadel;
 		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
 		24B1C0052F630000000ACP03 /* XCRemoteSwiftPackageReference "swift-acp" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/wiedymi/swift-acp.git";
@@ -756,7 +755,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		240D8B962F42F3C900FBFD13 /* Citadel */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 240D8B952F42F3C900FBFD13 /* XCRemoteSwiftPackageReference "citadel" */;
+			package = 240D8B952F42F3C900FBFD13 /* XCLocalSwiftPackageReference "Vendor/Citadel" */;
 			productName = Citadel;
 		};
 		24B1C0042F630000000ACP02 /* ACPModel */ = {

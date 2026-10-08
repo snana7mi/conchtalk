@@ -18,7 +18,7 @@ ConchTalk 是一个运行在 iOS 上的 AI 个人助手应用，通过 SSH 连�
 - **语言**: Swift 6（strict concurrency: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`）
 - **UI**: SwiftUI
 - **持久化**: SwiftData
-- **SSH**: Citadel 0.12.0（基于 SwiftNIO SSH）
+- **SSH**: Citadel 0.12.1（基于 SwiftNIO SSH；临时以本地包 vendored 于 `Vendor/`，swift-nio-ssh 打了 GHSA-998x-vgvp-xwpc 补丁，恢复上游步骤见 `Vendor/README.md`）
 - **AI 接入**: 用户自有 API（OpenAI Compatible / Anthropic）+ ACP Direct Mode
 - **构建**: Xcode project（`PBXFileSystemSynchronizedRootGroup`，Sources/ 下文件自动包含）
 - **部署目标**: iOS 26+

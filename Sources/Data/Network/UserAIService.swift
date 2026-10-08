@@ -68,7 +68,10 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
             apiKey: settings.apiKey,
             modelName: settings.modelName,
             strategy: settings.apiFormat == .anthropic
-                ? AnthropicFormatStrategy() : OpenAIFormatStrategy()
+                ? AnthropicFormatStrategy(
+                    automaticPromptCaching: AnthropicFormatStrategy.supportsAutomaticPromptCaching(endpointURL: endpointURL)
+                )
+                : OpenAIFormatStrategy()
         )
     }
 

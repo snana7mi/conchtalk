@@ -4,6 +4,29 @@ import Foundation
 
 nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
 
+    /// 是否在流式请求顶层加 `cache_control`（Anthropic 自动提示缓存：断点自动落在最后一个可缓存块，
+    /// 随对话增长前移）。第三方 Anthropic 兼容端点 / 旧版 Bedrock 集成可能不认该字段（返回 400），
+    /// 因此由调用方按端点决定，见 `supportsAutomaticPromptCaching(endpointURL:)`。
+    let automaticPromptCaching: Bool
+
+    init(automaticPromptCaching: Bool = false) {
+        self.automaticPromptCaching = automaticPromptCaching
+    }
+
+    /// 仅官方 Claude API（api.anthropic.com）启用顶层 cache_control。
+    static func supportsAutomaticPromptCaching(endpointURL: String) -> Bool {
+        guard let host = URL(string: endpointURL.trimmingCharacters(in: .whitespacesAndNewlines))?.host else {
+            return false
+        }
+        return host.lowercased() == "api.anthropic.com"
+    }
+
+    /// 请求体序列化：`.sortedKeys` 保证字典键顺序稳定（Swift 字典遍历顺序每次进程启动都会随机化，
+    /// 键序变化会改变请求前缀，导致提示缓存失效）。
+    static func serialize(_ body: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
     // MARK: - Headers
 
     func setAuthHeaders(on request: inout URLRequest, apiKey: String) {
@@ -29,7 +52,8 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
         ]
         if !systemText.isEmpty { body["system"] = systemText }
         if !convertedTools.isEmpty { body["tools"] = convertedTools }
-        return try JSONSerialization.data(withJSONObject: body)
+        if automaticPromptCaching { body["cache_control"] = ["type": "ephemeral"] }
+        return try Self.serialize(body)
     }
 
     func buildNonStreamingRequestBody(
@@ -49,7 +73,7 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
         if !systemText.isEmpty { body["system"] = systemText }
         if let temperature { body["temperature"] = temperature }
         // Anthropic 使用 thinking.budget_tokens 控制推理，reasoningEffort 暂不映射
-        return try JSONSerialization.data(withJSONObject: body)
+        return try Self.serialize(body)
     }
 
     // MARK: - Response Parsing
@@ -63,6 +87,8 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
         /// 按 index 追踪 content block 类型（"text" / "thinking" / "tool_use"）
         var blockTypes: [Int: String] = [:]
         var currentEvent: String?
+        /// message_start 给出输入侧用量，message_delta 给出累计输出用量；在 message_delta 时合并产出
+        var usage = StreamingTokenUsage()
 
         do {
             for try await line in bytes.lines {
@@ -84,7 +110,13 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
                 }
 
                 switch currentEvent {
-                case "message_start", "ping":
+                case "message_start":
+                    if let message = json["message"] as? [String: Any],
+                       let rawUsage = message["usage"] as? [String: Any] {
+                        usage = Self.mergeUsage(usage, with: rawUsage)
+                    }
+
+                case "ping":
                     break
 
                 case "content_block_start":
@@ -144,8 +176,11 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
                     blockTypes.removeValue(forKey: index)
 
                 case "message_delta":
-                    // 可在此处理 stop_reason 等信息，目前无需额外操作
-                    break
+                    // stop_reason 目前无需处理；usage 为累计值，合并后产出
+                    if let rawUsage = json["usage"] as? [String: Any] {
+                        usage = Self.mergeUsage(usage, with: rawUsage)
+                        if !usage.isEmpty { continuation.yield(.usage(usage)) }
+                    }
 
                 case "message_stop":
                     continuation.yield(.done)
@@ -178,6 +213,17 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
             continuation.yield(.error(error))
             continuation.finish()
         }
+    }
+
+    /// 合并 Anthropic usage 对象（message_start.message.usage / message_delta.usage）。
+    /// 后到的非空字段覆盖先前值（message_delta 中的数值为累计值）。
+    static func mergeUsage(_ current: StreamingTokenUsage, with raw: [String: Any]) -> StreamingTokenUsage {
+        var merged = current
+        if let v = raw["input_tokens"] as? Int { merged.inputTokens = v }
+        if let v = raw["output_tokens"] as? Int { merged.outputTokens = v }
+        if let v = raw["cache_read_input_tokens"] as? Int { merged.cacheReadInputTokens = v }
+        if let v = raw["cache_creation_input_tokens"] as? Int { merged.cacheCreationInputTokens = v }
+        return merged
     }
 
     func parseNonStreamingContent(from data: Data) throws -> String {

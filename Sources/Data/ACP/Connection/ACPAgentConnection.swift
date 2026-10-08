@@ -63,7 +63,7 @@ actor ACPAgentConnection: AgentConnection {
             guard let sshClient else {
                 throw ACPConnectionError.notConnected
             }
-            let transport: any ACPTransport = await SSHACPTransport(sshClient: sshClient, agentCommand: command)
+            let transport: any ACPTransport = SSHACPTransport(sshClient: sshClient, agentCommand: command)
             let requestTimeoutSeconds: TimeInterval = self?.agentInfo.type == .gemini ? 240 : 120
             let candidateConnection = ACPClientConnection(
                 transport: transport,

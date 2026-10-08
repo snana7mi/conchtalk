@@ -34,7 +34,7 @@ ConchTalk currently supports two ways to work:
 1. **Your own AI API**
    Configure your own endpoint, API key, and model. OpenAI-compatible and Anthropic-style APIs are supported. There is no ConchTalk-hosted fallback.
 2. **Direct agent mode**
-   If a compatible agent is already available on the remote server, ConchTalk can connect to it directly over SSH — no daemon or relay service is installed on your server. When an agent requests tool approval via `session/request_permission` (ACP) or `control_request` (Claude Code), the app shows a permission dialog and responds with the ACP-compliant `outcome`/`optionId` (auto-denied after 300 seconds with no action).
+   If a compatible agent is already available on the remote server, ConchTalk can connect to it directly over SSH — no daemon or relay service is installed on your server. When an agent requests tool approval via `session/request_permission` (ACP), `control_request` / `can_use_tool` (Claude Code, launched with `--permission-prompt-tool stdio`), or `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` (Codex app-server, threads started with `approvalPolicy: on-request`), the app shows a permission dialog and responds with the ACP-compliant `outcome`/`optionId` (auto-denied after 300 seconds with no action).
 
 The current codebase includes built-in support or detection for agents such as:
 
@@ -179,7 +179,7 @@ ConchTalk currently declares the following direct Swift Package dependencies:
 
 | Package | Used for | License | Repository |
 |---|---|---|---|
-| Citadel | SSH client functionality and SSH-related primitives | MIT | https://github.com/orlandos-nl/citadel |
+| Citadel | SSH client functionality and SSH-related primitives (temporarily vendored in `Vendor/` with a patched swift-nio-ssh for GHSA-998x-vgvp-xwpc; see `Vendor/README.md`) | MIT | https://github.com/orlandos-nl/citadel |
 | swift-acp (`ACPModel`) | ACP-related models/protocol integration for direct agent connectivity | MIT | https://github.com/wiedymi/swift-acp |
 
 ## Third-Party Assets and Data Sources

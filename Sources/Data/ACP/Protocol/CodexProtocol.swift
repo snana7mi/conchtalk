@@ -5,9 +5,13 @@ import Foundation
 // MARK: - 从 Codex stdout 接收的消息
 
 /// CodexRPCMessage：Codex app-server 输出的 JSON-RPC 消息。
-/// 包含 RPC 响应（有 id）和通知（有 method）两种。
+/// 三种形态（见 openai/codex `app-server-protocol/src/rpc.rs`）：
+/// - 响应：有 id、无 method（对客户端请求的回复）；
+/// - 服务端请求：同时有 id 和 method（如命令/文件修改审批），客户端必须按 id 回复；
+/// - 通知：有 method、无 id。
 nonisolated enum CodexRPCMessage: Decodable, Sendable {
     case response(CodexRPCResponse)
+    case request(CodexServerRequest)
     case notification(CodexNotification)
 
     init(from decoder: Decoder) throws {
@@ -15,19 +19,92 @@ nonisolated enum CodexRPCMessage: Decodable, Sendable {
         let hasId = container.contains(.id)
         let hasMethod = container.contains(.method)
 
-        if hasId && !hasMethod {
+        if hasId && hasMethod {
+            self = .request(try CodexServerRequest(from: decoder))
+        } else if hasId {
             self = .response(try CodexRPCResponse(from: decoder))
         } else if hasMethod {
             self = .notification(try CodexNotification(from: decoder))
         } else {
             throw DecodingError.dataCorrupted(.init(
-                codingPath: [], debugDescription: "CodexRPCMessage: neither response nor notification"
+                codingPath: [], debugDescription: "CodexRPCMessage: neither response, request nor notification"
             ))
         }
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, method
+    }
+}
+
+/// CodexRequestId：JSON-RPC 请求 ID，Codex 端定义为整数或字符串（untagged）。
+/// 回复时必须原样回传，不能经 AnyCodableJSON 的 Double 中转（会变成浮点数）。
+nonisolated enum CodexRequestId: Codable, Sendable, Equatable {
+    case int(Int)
+    case string(String)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let i = try? container.decode(Int.self) {
+            self = .int(i)
+        } else {
+            self = .string(try container.decode(String.self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .int(let i): try container.encode(i)
+        case .string(let s): try container.encode(s)
+        }
+    }
+}
+
+/// CodexServerRequest：Codex app-server 发给客户端的请求（有 id + method），需要回复。
+nonisolated struct CodexServerRequest: Decodable, Sendable {
+    let id: CodexRequestId
+    let method: String
+    let params: AnyCodableJSON?
+
+    /// 读取 params 中的字符串字段。
+    func stringParam(_ key: String) -> String? {
+        guard case .object(let obj) = params, case .string(let value) = obj[key] else { return nil }
+        return value
+    }
+}
+
+/// CodexServerResponse：回复 Codex 服务端请求的 JSON-RPC 消息（result 或 error 二选一）。
+nonisolated struct CodexServerResponse: Encodable, Sendable {
+    let id: CodexRequestId
+    let result: AnyCodableJSON?
+    let error: ErrorPayload?
+
+    nonisolated struct ErrorPayload: Encodable, Sendable {
+        let code: Int
+        let message: String
+    }
+
+    static func success(id: CodexRequestId, result: AnyCodableJSON) -> CodexServerResponse {
+        CodexServerResponse(id: id, result: result, error: nil)
+    }
+
+    static func failure(id: CodexRequestId, code: Int, message: String) -> CodexServerResponse {
+        CodexServerResponse(id: id, result: nil, error: ErrorPayload(code: code, message: message))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, result, error
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        if let error {
+            try container.encode(error, forKey: .error)
+        } else {
+            try container.encode(result ?? .null, forKey: .result)
+        }
     }
 }
 
@@ -158,8 +235,14 @@ extension CodexRPCRequest {
         ])
     }
 
+    /// thread/start：显式设置 `approvalPolicy = "on-request"`（Codex 交互式默认策略：
+    /// 沙箱内操作直接执行，需越过沙箱时由模型发起审批请求，经 App 权限 UI 确认）。
+    /// 不覆盖 sandbox，沿用用户 Codex 配置。
     static func threadStart(id: Int, cwd: String) -> CodexRPCRequest {
-        CodexRPCRequest(id: id, method: "thread/start", params: ["cwd": .string(cwd)])
+        CodexRPCRequest(id: id, method: "thread/start", params: [
+            "cwd": .string(cwd),
+            "approvalPolicy": .string(CodexApprovalPolicy.onRequest)
+        ])
     }
 
     static func turnStart(
@@ -180,5 +263,76 @@ extension CodexRPCRequest {
 
     static func turnInterrupt(id: Int, threadId: String) -> CodexRPCRequest {
         CodexRPCRequest(id: id, method: "turn/interrupt", params: ["threadId": .string(threadId)])
+    }
+}
+
+// MARK: - 服务端请求（审批）桥接
+
+/// CodexApprovalPolicy：thread/start 的 approvalPolicy 取值（Codex `AskForApproval`，kebab-case）。
+nonisolated enum CodexApprovalPolicy {
+    static let untrusted = "untrusted"
+    static let onRequest = "on-request"
+    static let never = "never"
+}
+
+/// CodexServerRequestBridge：把 Codex 服务端请求映射为 App 权限请求，并构造回复。
+/// 纯函数集合，便于单元测试。方法名与字段来自 openai/codex `app-server-protocol` v2。
+nonisolated enum CodexServerRequestBridge {
+    static let commandApprovalMethod = "item/commandExecution/requestApproval"
+    static let fileChangeApprovalMethod = "item/fileChange/requestApproval"
+    static let permissionsApprovalMethod = "item/permissions/requestApproval"
+    static let mcpElicitationMethod = "mcpServer/elicitation/request"
+
+    /// 需要经 App 权限 UI 由用户确认的请求；其他请求返回 nil。
+    static func permissionRequest(for request: CodexServerRequest) -> ACPPermissionRequest? {
+        switch request.method {
+        case commandApprovalMethod:
+            var lines: [String] = []
+            lines.append(request.stringParam("command") ?? "Run command")
+            if let cwd = request.stringParam("cwd") { lines.append("cwd: \(cwd)") }
+            if let reason = request.stringParam("reason") { lines.append(reason) }
+            return ACPPermissionRequest(
+                description: lines.joined(separator: "\n"),
+                tool: "commandExecution",
+                options: []
+            )
+        case fileChangeApprovalMethod:
+            var lines = ["Apply file changes"]
+            if let root = request.stringParam("grantRoot") { lines.append("grant write access: \(root)") }
+            if let reason = request.stringParam("reason") { lines.append(reason) }
+            return ACPPermissionRequest(
+                description: lines.joined(separator: "\n"),
+                tool: "fileChange",
+                options: []
+            )
+        default:
+            return nil
+        }
+    }
+
+    /// 用户审批结果 → 回复。accept 仅对本次生效；拒绝用 decline（让 Codex 继续本轮，而非 cancel 中断）。
+    static func approvalResponse(for request: CodexServerRequest, approved: Bool) -> CodexServerResponse {
+        .success(id: request.id, result: .object(["decision": .string(approved ? "accept" : "decline")]))
+    }
+
+    /// 不经 UI 的请求的默认回复：
+    /// - 追加权限请求：授予空权限集（等价拒绝）；
+    /// - MCP elicitation：decline；
+    /// - 其他（item/tool/call、requestUserInput、token 刷新等）：JSON-RPC -32601，避免 Codex 一直等待。
+    static func defaultResponse(for request: CodexServerRequest) -> CodexServerResponse {
+        switch request.method {
+        case permissionsApprovalMethod:
+            return .success(id: request.id, result: .object([
+                "permissions": .object([:]),
+                "scope": .string("turn")
+            ]))
+        case mcpElicitationMethod:
+            return .success(id: request.id, result: .object([
+                "action": .string("decline"),
+                "content": .null
+            ]))
+        default:
+            return .failure(id: request.id, code: -32601, message: "Method not supported by ConchTalk: \(request.method)")
+        }
     }
 }

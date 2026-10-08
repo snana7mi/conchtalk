@@ -120,6 +120,8 @@ actor CodexConnection: AgentConnection {
 
     private var updateHandler: (@Sendable (SessionUpdate) -> Void)?
     private var disconnectHandler: (@Sendable () -> Void)?
+    /// 权限请求回调：由 DirectAgentSession 设置，桥接到 UI 审批流程。
+    private var permissionRequestHandler: (@Sendable (ACPPermissionRequest) async -> Bool)?
     private(set) var configOptions: [SessionConfigOption] = []
     private(set) var modelsInfo: ModelsInfo?
     private(set) var modesInfo: ModesInfo?
@@ -142,9 +144,11 @@ actor CodexConnection: AgentConnection {
 
     func setConfigUpdateHandler(_ handler: @escaping @Sendable () -> Void) {}
 
-    /// Codex 走自有审批协议（app-server user_input 流），本期不接入 UI 审批流；
-    /// 空实现满足 AgentConnection 协议（见 spec 2.2 范围说明）。
-    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) {}
+    /// Codex 的命令执行 / 文件修改审批以服务端 JSON-RPC 请求下发
+    /// （item/commandExecution/requestApproval、item/fileChange/requestApproval），经此回调交给 App 权限 UI。
+    func setPermissionHandler(_ handler: @escaping @Sendable (ACPPermissionRequest) async -> Bool) {
+        permissionRequestHandler = handler
+    }
 
     func connect(cwd: String) async throws -> AgentConnectionInfo {
         let proc = SSHProcessTransport(sshClient: sshClient, command: "codex app-server")
@@ -299,6 +303,9 @@ actor CodexConnection: AgentConnection {
             case .notification:
                 // 握手阶段的通知，忽略
                 continue
+            case .request(let req):
+                // 握手阶段不应出现服务端请求；仍按默认策略回复，避免对端阻塞
+                await sendServerResponse(CodexServerRequestBridge.defaultResponse(for: req))
             }
         }
 
@@ -378,7 +385,30 @@ actor CodexConnection: AgentConnection {
 
         case .notification(let notif):
             await handleNotification(notif)
+
+        case .request(let req):
+            // 审批会等待用户操作，放到独立任务中，避免阻塞消息路由（期间仍需处理通知）
+            Task { [weak self] in
+                await self?.handleServerRequest(req)
+            }
         }
+    }
+
+    /// 处理 Codex 服务端请求：审批类交给权限 UI，其余按默认策略回复。
+    private func handleServerRequest(_ req: CodexServerRequest) async {
+        guard let permRequest = CodexServerRequestBridge.permissionRequest(for: req) else {
+            await sendServerResponse(CodexServerRequestBridge.defaultResponse(for: req))
+            return
+        }
+        let approved = await permissionRequestHandler?(permRequest) ?? false
+        await sendServerResponse(CodexServerRequestBridge.approvalResponse(for: req, approved: approved))
+    }
+
+    private func sendServerResponse(_ response: CodexServerResponse) async {
+        guard let transport,
+              let data = try? JSONEncoder().encode(response),
+              let json = String(data: data, encoding: .utf8) else { return }
+        try? await transport.writeLine(json)
     }
 
     /// 处理通知消息，翻译为 SessionUpdate。
@@ -415,7 +445,8 @@ actor CodexConnection: AgentConnection {
             }
 
         case "thread/tokenUsage/updated", "account/rateLimits/updated",
-             "thread/started", "thread/status/changed", "turn/started":
+             "thread/started", "thread/status/changed", "turn/started",
+             "serverRequest/resolved":
             // 信息性通知，静默忽略
             break
 

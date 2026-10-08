@@ -102,7 +102,7 @@ struct AIStreamingIntegrationTests {
 
         for await delta in stream {
             switch delta {
-            case .content, .reasoning, .toolCall, .done, .contextCompressing:
+            case .content, .reasoning, .toolCall, .done, .contextCompressing, .usage:
                 deltaCount += 1
             case .error(let error):
                 Issue.record("Unexpected error in stream: \(error)")

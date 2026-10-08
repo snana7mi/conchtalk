@@ -49,7 +49,7 @@ struct AgenticLoopIntegrationTests {
                 currentText += text
             case .toolCall(let tc):
                 pendingToolCall = tc
-            case .done, .error, .reasoning, .contextCompressing:
+            case .done, .error, .reasoning, .contextCompressing, .usage:
                 break
             }
         }
@@ -96,7 +96,7 @@ struct AgenticLoopIntegrationTests {
                     currentText += text
                 case .toolCall(let nextTC):
                     pendingToolCall = nextTC
-                case .done, .error, .reasoning, .contextCompressing:
+                case .done, .error, .reasoning, .contextCompressing, .usage:
                     break
                 }
             }

@@ -78,9 +78,11 @@ actor ACPClientConnection {
 
         let params = InitializeRequest(
             protocolVersion: 1,
+            // 只声明真正实现的能力：本端未实现 fs/read_text_file、fs/write_text_file、terminal/*
+            // （handleAgentRequest 对它们回 -32601），按 ACP 规范应声明为 false，代理会改用自身工具。
             clientCapabilities: ClientCapabilities(
-                fs: FileSystemCapabilities(readTextFile: true, writeTextFile: true),
-                terminal: true
+                fs: FileSystemCapabilities(readTextFile: false, writeTextFile: false),
+                terminal: false
             ),
             clientInfo: ClientInfo(name: "ConchTalk", version: "1.0.0")
         )

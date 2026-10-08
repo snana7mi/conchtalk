@@ -171,7 +171,7 @@ ConchTalk 当前声明的直接 Swift Package 依赖如下：
 
 | Package | 用途 | License | 仓库 |
 |---|---|---|---|
-| Citadel | SSH 客户端能力与相关 SSH 基础功能 | MIT | https://github.com/orlandos-nl/citadel |
+| Citadel | SSH 客户端能力与相关 SSH 基础功能（临时 vendored 于 `Vendor/`，并附带修复 GHSA-998x-vgvp-xwpc 的 swift-nio-ssh 补丁，见 `Vendor/README.md`） | MIT | https://github.com/orlandos-nl/citadel |
 | swift-acp (`ACPModel`) | 用于直连代理能力中的 ACP 协议模型集成 | MIT | https://github.com/wiedymi/swift-acp |
 
 ## 第三方资源与数据来源

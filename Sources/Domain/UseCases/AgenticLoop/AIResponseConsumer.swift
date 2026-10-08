@@ -12,6 +12,14 @@ nonisolated enum AIResponseConsumer {
         let pendingToolCalls: [ToolCall]
     }
 
+    /// 调试输出 token 用量（含提示缓存读写），Release 构建为空操作。
+    static func logUsage(_ usage: StreamingTokenUsage) {
+        #if DEBUG
+        func text(_ value: Int?) -> String { value.map { String($0) } ?? "-" }
+        print("[AIResponseConsumer] usage input=\(text(usage.inputTokens)) output=\(text(usage.outputTokens)) cacheRead=\(text(usage.cacheReadInputTokens)) cacheWrite=\(text(usage.cacheCreationInputTokens))")
+        #endif
+    }
+
     /// 消费流式响应直到结束。
     /// - Parameters:
     ///   - stream: AI 流式响应事件流。
@@ -77,6 +85,9 @@ nonisolated enum AIResponseConsumer {
             case .contextCompressing:
                 isCompressing = true
                 await onContextCompressing(true)
+            case .usage(let usage):
+                // 仅用于调试观察提示缓存命中情况，不影响流程
+                Self.logUsage(usage)
             case .done:
                 if isCompressing {
                     isCompressing = false

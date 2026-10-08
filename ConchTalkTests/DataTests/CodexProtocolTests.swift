@@ -98,6 +98,118 @@ struct CodexProtocolTests {
         #expect(json(data).contains("hello"))
     }
 
+    // MARK: - 服务端请求（审批）
+
+    @Test("同时有 id 和 method 的消息解码为服务端请求，而非通知")
+    func decodeServerRequest() throws {
+        let json = """
+        {"id":8,"method":"item/commandExecution/requestApproval","params":{"threadId":"t1","turnId":"turn1","itemId":"cmd1","startedAtMs":1,"command":"rm -rf build","cwd":"/repo","reason":"needs write"}}
+        """
+        let msg = try JSONDecoder().decode(CodexRPCMessage.self, from: json.data(using: .utf8)!)
+        guard case .request(let req) = msg else {
+            Issue.record("Expected request")
+            return
+        }
+        #expect(req.id == .int(8))
+        #expect(req.method == "item/commandExecution/requestApproval")
+        #expect(req.stringParam("command") == "rm -rf build")
+    }
+
+    @Test("字符串 request id 原样保留")
+    func decodeServerRequestStringId() throws {
+        let json = """
+        {"id":"req-1","method":"item/fileChange/requestApproval","params":{"threadId":"t1","turnId":"turn1","itemId":"fc1","startedAtMs":1}}
+        """
+        let msg = try JSONDecoder().decode(CodexRPCMessage.self, from: json.data(using: .utf8)!)
+        guard case .request(let req) = msg else {
+            Issue.record("Expected request")
+            return
+        }
+        #expect(req.id == .string("req-1"))
+    }
+
+    @Test("命令审批映射为权限请求，批准回复 accept、拒绝回复 decline")
+    func commandApprovalRoundTrip() throws {
+        let req = try decodeRequest("""
+        {"id":8,"method":"item/commandExecution/requestApproval","params":{"threadId":"t1","turnId":"turn1","itemId":"cmd1","startedAtMs":1,"command":"make install","cwd":"/repo"}}
+        """)
+        let perm = try #require(CodexServerRequestBridge.permissionRequest(for: req))
+        #expect(perm.tool == "commandExecution")
+        #expect(perm.description.contains("make install"))
+        #expect(perm.description.contains("/repo"))
+
+        let accepted = try encodeObject(CodexServerRequestBridge.approvalResponse(for: req, approved: true))
+        #expect(accepted["id"] as? Int == 8)
+        #expect((accepted["result"] as? [String: Any])?["decision"] as? String == "accept")
+        #expect(accepted["error"] == nil)
+
+        let declined = try encodeObject(CodexServerRequestBridge.approvalResponse(for: req, approved: false))
+        #expect((declined["result"] as? [String: Any])?["decision"] as? String == "decline")
+    }
+
+    @Test("文件修改审批映射为权限请求")
+    func fileChangeApproval() throws {
+        let req = try decodeRequest("""
+        {"id":"x","method":"item/fileChange/requestApproval","params":{"threadId":"t1","turnId":"turn1","itemId":"fc1","startedAtMs":1,"grantRoot":"/etc"}}
+        """)
+        let perm = try #require(CodexServerRequestBridge.permissionRequest(for: req))
+        #expect(perm.tool == "fileChange")
+        #expect(perm.description.contains("/etc"))
+        let response = try encodeObject(CodexServerRequestBridge.approvalResponse(for: req, approved: true))
+        #expect(response["id"] as? String == "x")
+    }
+
+    @Test("不支持的服务端请求回复 JSON-RPC -32601，而不是静默忽略")
+    func unsupportedRequestGetsError() throws {
+        let req = try decodeRequest("""
+        {"id":3,"method":"item/tool/call","params":{}}
+        """)
+        #expect(CodexServerRequestBridge.permissionRequest(for: req) == nil)
+        let response = try encodeObject(CodexServerRequestBridge.defaultResponse(for: req))
+        #expect(response["id"] as? Int == 3)
+        #expect((response["error"] as? [String: Any])?["code"] as? Int == -32601)
+        #expect(response["result"] == nil)
+    }
+
+    @Test("追加权限请求默认授予空权限集，MCP elicitation 默认 decline")
+    func defaultResponsesForPermissionsAndElicitation() throws {
+        let permReq = try decodeRequest("""
+        {"id":4,"method":"item/permissions/requestApproval","params":{}}
+        """)
+        let perm = try encodeObject(CodexServerRequestBridge.defaultResponse(for: permReq))
+        let permResult = try #require(perm["result"] as? [String: Any])
+        #expect((permResult["permissions"] as? [String: Any])?.isEmpty == true)
+        #expect(permResult["scope"] as? String == "turn")
+
+        let elicitReq = try decodeRequest("""
+        {"id":5,"method":"mcpServer/elicitation/request","params":{}}
+        """)
+        let elicit = try encodeObject(CodexServerRequestBridge.defaultResponse(for: elicitReq))
+        #expect((elicit["result"] as? [String: Any])?["action"] as? String == "decline")
+    }
+
+    @Test("thread/start 显式设置 approvalPolicy=on-request")
+    func threadStartSetsApprovalPolicy() throws {
+        let data = try JSONEncoder().encode(CodexRPCRequest.threadStart(id: 2, cwd: "/repo"))
+        let parsed = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let params = parsed["params"] as? [String: Any]
+        #expect(params?["cwd"] as? String == "/repo")
+        #expect(params?["approvalPolicy"] as? String == "on-request")
+    }
+
+    private func decodeRequest(_ json: String) throws -> CodexServerRequest {
+        let msg = try JSONDecoder().decode(CodexRPCMessage.self, from: json.data(using: .utf8)!)
+        guard case .request(let req) = msg else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Expected request"))
+        }
+        return req
+    }
+
+    private func encodeObject(_ response: CodexServerResponse) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(response)
+        return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+
     /// 辅助方法：将 Data 转为 JSON 字符串。
     private func json(_ data: Data) -> String {
         String(data: data, encoding: .utf8) ?? ""

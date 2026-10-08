@@ -4,6 +4,25 @@ import Foundation
 
 nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
 
+    /// 请求体序列化：`.sortedKeys` 保证字典键顺序稳定，使相同前缀的请求字节一致，
+    /// 以命中 OpenAI 等服务商的自动前缀缓存（Swift 字典遍历顺序会随机化）。
+    static func serialize(_ body: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    /// 解析 chunk 中的 usage（OpenAI 仅在请求 stream_options.include_usage 时于最后一个 chunk 返回；
+    /// 部分兼容服务商默认返回）。本端不主动请求，避免不支持 stream_options 的服务商报错。
+    static func parseUsage(from chunk: [String: Any]) -> StreamingTokenUsage? {
+        guard let raw = chunk["usage"] as? [String: Any] else { return nil }
+        var usage = StreamingTokenUsage()
+        usage.inputTokens = raw["prompt_tokens"] as? Int
+        usage.outputTokens = raw["completion_tokens"] as? Int
+        if let details = raw["prompt_tokens_details"] as? [String: Any] {
+            usage.cacheReadInputTokens = details["cached_tokens"] as? Int
+        }
+        return usage.isEmpty ? nil : usage
+    }
+
     // MARK: - Headers
 
     func setAuthHeaders(on request: inout URLRequest, apiKey: String) {
@@ -28,7 +47,7 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
         if !toolDefinitions.isEmpty {
             body["tools"] = toolDefinitions
         }
-        return try JSONSerialization.data(withJSONObject: body)
+        return try Self.serialize(body)
     }
 
     func buildNonStreamingRequestBody(
@@ -49,7 +68,7 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
         if let temperature { body["temperature"] = temperature }
         // 推理模型支持 reasoning_effort 参数，不支持的模型会忽略此字段
         if let reasoningEffort { body["reasoning_effort"] = reasoningEffort }
-        return try JSONSerialization.data(withJSONObject: body)
+        return try Self.serialize(body)
     }
 
     // MARK: - Response Parsing
@@ -68,8 +87,16 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
                 if payload == "[DONE]" { break }
 
                 guard let data = payload.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let choices = json["choices"] as? [[String: Any]],
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    continue
+                }
+
+                // usage 通常在 choices 为空的最后一个 chunk 中
+                if let usage = Self.parseUsage(from: json) {
+                    continuation.yield(.usage(usage))
+                }
+
+                guard let choices = json["choices"] as? [[String: Any]],
                       let choice = choices.first,
                       let delta = choice["delta"] as? [String: Any] else {
                     continue

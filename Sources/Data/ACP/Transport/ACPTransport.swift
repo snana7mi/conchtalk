@@ -8,7 +8,7 @@ typealias ACPMessage = ACPModel.Message
 
 /// ACPTransport：定义 ACP 消息传输的抽象接口。
 /// 不同的传输实现（SSH、本地 stdio 等）遵循此协议。
-protocol ACPTransport: Sendable {
+nonisolated protocol ACPTransport: Sendable {
     /// 启动传输，建立底层连接。
     func start() async throws
     /// 发送一条 JSON-RPC 消息。

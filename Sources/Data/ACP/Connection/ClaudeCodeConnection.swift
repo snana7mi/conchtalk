@@ -63,6 +63,18 @@ nonisolated enum ClaudeCodeMessageTranslator {
     }
 }
 
+// MARK: - 启动命令
+
+/// ClaudeCodeCommandBuilder：构造远端 Claude Code CLI 启动命令（纯函数，便于单元测试）。
+nonisolated enum ClaudeCodeCommandBuilder {
+    /// --permission-prompt-tool stdio：需要授权的工具调用以 control_request(can_use_tool) 经 stdout 发给本端，
+    /// 由 App 权限 UI 决定后回写 control_response（与官方 Agent SDK 的 canUseTool 机制相同）。
+    static func launchCommand(cwd: String) -> String {
+        let escapedCwd = cwd.replacingOccurrences(of: "'", with: "'\\''")
+        return "sh -c 'cd \"\(escapedCwd)\" && exec claude -p --output-format stream-json --input-format stream-json --verbose --permission-prompt-tool stdio'"
+    }
+}
+
 // MARK: - ClaudeCodeConnection
 
 /// ClaudeCodeConnection：通过 SSH 直接与 Claude Code CLI 通信。
@@ -116,8 +128,7 @@ actor ClaudeCodeConnection: AgentConnection {
         print("[ClaudeCodeConnection] connect() called, cwd=\(cwd)")
 
         // 启动持久 Claude Code 进程
-        let escapedCwd = cwd.replacingOccurrences(of: "'", with: "'\\''")
-        let command = "sh -c 'cd \"\(escapedCwd)\" && exec claude -p --output-format stream-json --input-format stream-json --verbose'"
+        let command = ClaudeCodeCommandBuilder.launchCommand(cwd: cwd)
         let proc = SSHProcessTransport(sshClient: sshClient, command: command)
         try await proc.start()
         self.transport = proc
@@ -195,7 +206,18 @@ actor ClaudeCodeConnection: AgentConnection {
             try? await Task.sleep(for: .seconds(1))
             await self?.finishCanceledTurnDrainIfNeeded()
         }
-        try? await transport?.writeRaw("\u{03}")
+        // 官方中断方式：发送 control_request(subtype=interrupt)，CLI 结束当前轮并输出 result。
+        // 旧实现写入 Ctrl-C 字节：exec 通道下只是 NDJSON stdin 上的噪声，PTY 回退时则变成 SIGINT 杀掉整个进程。
+        let interrupt = ClaudeCodeControlRequestMessage.interrupt(requestId: Self.makeControlRequestId())
+        if let data = try? JSONEncoder().encode(interrupt),
+           let json = String(data: data, encoding: .utf8) {
+            try? await transport?.writeLine(json)
+        }
+    }
+
+    /// 生成客户端 control_request 的唯一 ID（官方 SDK 用 req_<序号>_<随机 hex>，CLI 只要求唯一）。
+    private static func makeControlRequestId() -> String {
+        "req_conchtalk_\(UUID().uuidString.prefix(8).lowercased())"
     }
 
     func disconnect() async {
@@ -322,6 +344,15 @@ actor ClaudeCodeConnection: AgentConnection {
     // MARK: - 权限处理
 
     private func handlePermissionRequest(_ req: ClaudeControlRequest) async {
+        // 只有 can_use_tool 走权限 UI；其他子类型（hook_callback、mcp_message 等）本端未注册，回复 error。
+        if let subtype = req.request.subtype, subtype != "can_use_tool" {
+            await writeControlResponse(.error(
+                requestId: req.requestId,
+                message: "Unsupported control request subtype: \(subtype)"
+            ))
+            return
+        }
+
         let description = ClaudeCodeMessageTranslator.permissionDescription(from: req)
 
         let update = SessionUpdate.toolCall(ToolCallUpdate(
@@ -341,11 +372,14 @@ actor ClaudeCodeConnection: AgentConnection {
 
         let response: ClaudeCodeControlResponse
         if approved {
-            response = ClaudeCodeControlResponse.allow(requestId: req.requestId)
+            response = ClaudeCodeControlResponse.allow(requestId: req.requestId, input: req.request.input)
         } else {
             response = ClaudeCodeControlResponse.deny(requestId: req.requestId, message: "User denied")
         }
+        await writeControlResponse(response)
+    }
 
+    private func writeControlResponse(_ response: ClaudeCodeControlResponse) async {
         if let data = try? JSONEncoder().encode(response),
            let json = String(data: data, encoding: .utf8) {
             try? await transport?.writeLine(json)
