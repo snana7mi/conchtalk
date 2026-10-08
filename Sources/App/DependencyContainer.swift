@@ -180,7 +180,8 @@ final class DependencyContainer {
             contextCompactor: ctxCompactor,
             keepAlive: BackgroundKeepAlive(),
             notificationService: notifSvc,
-            subagentRegistry: subagentRegistry
+            subagentRegistry: subagentRegistry,
+            continuedProcessing: ContinuedProcessingKeeper(scheduler: SystemContinuedProcessingScheduler())
         )
         self.taskExecutionCoordinator = tec
 

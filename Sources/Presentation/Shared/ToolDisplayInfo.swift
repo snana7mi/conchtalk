@@ -15,6 +15,8 @@ struct ToolDisplayInfo: Sendable {
         case "read_file":                return ToolDisplayInfo(iconName: "doc.text", color: .green)
         case "write_file":               return ToolDisplayInfo(iconName: "doc.text.fill", color: .orange)
         case "suggest_agent_connection": return ToolDisplayInfo(iconName: "bolt.fill", color: .blue)
+        case "update_plan":              return ToolDisplayInfo(iconName: "list.bullet.clipboard", color: .blue)
+        case "ask_user":                 return ToolDisplayInfo(iconName: "questionmark.bubble", color: .purple)
         default:                         return ToolDisplayInfo(iconName: "wrench", color: .teal)
         }
     }

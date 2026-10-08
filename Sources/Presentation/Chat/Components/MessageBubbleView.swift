@@ -14,6 +14,8 @@ struct MessageBubbleView: View {
     var presentationState: DirectModePresentationState? = nil
     /// 点击服务器头像的回调
     var onServerAvatarTap: (() -> Void)? = nil
+    /// ask_user 问题卡片的选项点选回调（仅最新且可回答的问题传入）。
+    var onAnswerQuestion: ((String) -> Void)? = nil
     @State private var skillLoadedVisible = false
 
     var body: some View {
@@ -209,7 +211,13 @@ struct MessageBubbleView: View {
     private var commandBubble: some View {
         HStack(alignment: .top, spacing: 8) {
             contextualAvatar
-            CommandDetailView(message: message)
+            if let toolCall = message.toolCall, let plan = AgentPlanUpdate.from(toolCall: toolCall) {
+                PlanChecklistView(entries: plan.entries, note: plan.explanation, compact: false)
+            } else if let toolCall = message.toolCall, let question = UserQuestion.from(toolCall: toolCall) {
+                UserQuestionCardView(question: question, onSelect: onAnswerQuestion)
+            } else {
+                CommandDetailView(message: message)
+            }
         }
     }
 

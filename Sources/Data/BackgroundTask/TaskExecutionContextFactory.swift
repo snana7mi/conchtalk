@@ -45,7 +45,7 @@ struct TaskExecutionContextFactory {
 
     // MARK: - Context Construction
 
-    /// 构建服务器上下文字符串，包含基础信息、系统 profile 和记忆上下文。
+    /// 构建服务器上下文字符串，包含基础信息、系统 profile、服务器 AGENTS.md / skills 摘要和记忆上下文。
     func buildServerContext(serverID: UUID, server: Server, userInput: String) async -> String {
         let detectedOS = sshManager.getDetectedOS(for: serverID)
         var baseServerContext = "ServerName: \(server.name), Host: \(server.host), User: \(server.username), OS: \(detectedOS)"
@@ -54,6 +54,11 @@ struct TaskExecutionContextFactory {
         let profile = try? await store.fetchSystemProfile(forServer: serverID)
         if let profile {
             baseServerContext += "\n\n" + profile.formattedContext()
+        }
+
+        // 服务器 ~/AGENTS.md 与 ~/.agents/skills 摘要（只读，按连接缓存）
+        if let block = await sshManager.agentInstructions(for: serverID)?.contextBlock {
+            baseServerContext += "\n\n" + block
         }
 
         // 记忆上下文

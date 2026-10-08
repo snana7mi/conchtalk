@@ -27,6 +27,9 @@ final class SSHSessionManager {
     /// 每个服务器探测到的工具能力。
     private var detectedCapabilities: [UUID: ServerCapabilities] = [:]
 
+    /// 每个服务器的 ~/AGENTS.md 与 ~/.agents/skills 摘要缓存（按连接生命周期，断开时清除）。
+    private var agentInstructionsCache: [UUID: ServerAgentInstructions] = [:]
+
     /// 当前已建立 SSH 连接的服务器 ID 集合，供 UI 观察（如对话列表的绿色发光效果）。
     var activeConnectionIDs: Set<UUID> = []
 
@@ -191,6 +194,7 @@ final class SSHSessionManager {
         lastConnectionParams.removeValue(forKey: serverID)
         detectedOS.removeValue(forKey: serverID)
         detectedCapabilities.removeValue(forKey: serverID)
+        agentInstructionsCache.removeValue(forKey: serverID)
     }
 
     /// 断开全部 SSH 连接 — 逐服务器走 disconnect(from:)（内部加锁）。
@@ -249,6 +253,30 @@ final class SSHSessionManager {
     /// 获取指定服务器检测到的操作系统名称。
     func getDetectedOS(for serverID: UUID) -> String {
         return detectedOS[serverID] ?? "Linux"
+    }
+
+    // MARK: - 服务器 AGENTS.md / Skills
+
+    /// 只读读取服务器账号下的 ~/AGENTS.md 与 ~/.agents/skills 摘要；每个连接只读取一次。
+    /// 读取失败（超时、断线）不缓存，下次任务再试；非 POSIX 服务器缓存为空结果。
+    func agentInstructions(for serverID: UUID) async -> ServerAgentInstructions? {
+        if let cached = agentInstructionsCache[serverID] {
+            return cached.isEmpty ? nil : cached
+        }
+        guard let client = clients[serverID] else { return nil }
+        do {
+            let output = try await client.execute(command: ServerAgentInstructions.probeCommand, timeout: 5)
+            let parsed = ServerAgentInstructions.parse(output)
+                ?? ServerAgentInstructions(agentsMarkdown: nil, skills: [])
+            // 读取期间连接可能已断开或重连，仅在同一客户端仍在时写入缓存。
+            if clients[serverID] === client {
+                agentInstructionsCache[serverID] = parsed
+            }
+            return parsed.isEmpty ? nil : parsed
+        } catch {
+            print("[AgentInstructions] Failed to read server instructions for server=\(serverID): \(error)")
+            return nil
+        }
     }
 
     // MARK: - 能力探测

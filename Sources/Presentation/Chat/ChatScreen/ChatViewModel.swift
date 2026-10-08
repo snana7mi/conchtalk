@@ -463,7 +463,8 @@ final class ChatViewModel {
                         agent: agent,
                         cwd: cwd,
                         sshClient: await self.resolveSSHClient(),
-                        currentMessageCount: self.messages.count
+                        currentMessageCount: self.messages.count,
+                        resumeServerID: self.serverID
                     )
                 }
             }
@@ -550,6 +551,14 @@ final class ChatViewModel {
             directPermissionRequest = request
         case .error(let errorText):
             appendSystemMessage(errorText, type: .error)
+        case .sessionResumed(let agentName):
+            appendSystemMessage(
+                String(
+                    format: String(localized: "Resumed your previous %@ session. Clear the context to start a new one.", bundle: LanguageSettings.currentBundle),
+                    agentName
+                ),
+                type: .info
+            )
         }
     }
 

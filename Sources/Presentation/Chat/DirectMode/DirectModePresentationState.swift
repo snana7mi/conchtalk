@@ -17,6 +17,30 @@ struct DirectModeMetadata {
     var models: ModelsInfo?
     var modes: ModesInfo?
     var configOptions: [SessionConfigOption] = []
+    /// 代理上报的上下文用量（ACP `usage_update`）。
+    var contextUsage: DirectContextUsage?
+}
+
+/// DirectContextUsage：代理会话上下文窗口用量快照。
+nonisolated struct DirectContextUsage: Equatable, Sendable {
+    let used: Int
+    let size: Int
+
+    /// 已用比例（0...1）；size 无效时为 nil。
+    var fraction: Double? {
+        guard size > 0 else { return nil }
+        return min(max(Double(used) / Double(size), 0), 1)
+    }
+
+    /// 以 K 为单位的紧凑 token 文本，如 "90K"。
+    static func compact(_ tokens: Int) -> String {
+        if tokens >= 1_000_000 {
+            let millions = Double(tokens) / 1_000_000
+            let text = String(format: "%.1f", millions)
+            return (text.hasSuffix(".0") ? String(text.dropLast(2)) : text) + "M"
+        }
+        return tokens >= 1000 ? "\(tokens / 1000)K" : "\(tokens)"
+    }
 }
 
 /// DirectModePresentationState：直连模式 UI 的统一展示模型。

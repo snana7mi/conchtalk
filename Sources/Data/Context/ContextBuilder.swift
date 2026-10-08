@@ -100,9 +100,16 @@ struct ContextBuilder: Sendable {
     }
 
     /// 估算消息列表的 token 总数（含 toolOutput / reasoningContent）。
+    /// 工具输出按实际发给模型的内容估算（旧结果清理 / 头尾截断后），避免高估而过早触发摘要压缩。
     nonisolated private func estimateMessagesTokens(_ messages: [Message]) -> Int {
-        messages.reduce(0) { total, msg in
-            total + tokenEstimator.estimateTokens(for: msg)
+        let visibleOutputs = MessageBuilder.modelVisibleToolOutputs(for: messages)
+        return messages.reduce(0) { total, msg in
+            guard let visible = visibleOutputs[msg.id] else {
+                return total + tokenEstimator.estimateTokens(for: msg)
+            }
+            var adjusted = msg
+            adjusted.toolOutput = visible
+            return total + tokenEstimator.estimateTokens(for: adjusted)
         }
     }
 }

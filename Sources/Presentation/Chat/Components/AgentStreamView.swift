@@ -196,30 +196,8 @@ struct AgentStreamView: View {
     }
 
     private func planCard(entries: [AgentPlanEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label {
-                Text(String(localized: "执行计划", bundle: LanguageSettings.currentBundle))
-                    .font(.caption)
-            } icon: {
-                Image(systemName: "list.bullet.clipboard")
-            }
-            .foregroundStyle(.blue)
-
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                HStack(spacing: 6) {
-                    Image(systemName: planStatusIcon(entry.status))
-                        .font(.caption2)
-                    Text(entry.title)
-                        .font(.caption)
-                }
-                .foregroundStyle(.secondary)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .padding(.horizontal, 12)
+        PlanChecklistView(entries: entries)
+            .padding(.horizontal, 12)
     }
 
     private var completedCard: some View {
@@ -241,13 +219,5 @@ struct AgentStreamView: View {
 
     private func toolColor(for name: String) -> Color {
         ToolDisplayInfo.fuzzyInfo(for: name).color
-    }
-
-    private func planStatusIcon(_ status: String?) -> String {
-        switch status {
-        case "completed": return "checkmark.circle.fill"
-        case "in_progress": return "circle.dotted"
-        default: return "circle"
-        }
     }
 }

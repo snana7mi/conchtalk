@@ -26,6 +26,8 @@ nonisolated enum ToolRegistryFactory {
             SuggestAgentConnectionTool(),
             ActivateSkillTool(skillRegistry: skillRegistry),
             DispatchSubagentTool(subagentSummaries: subagentSummaries),
+            UpdatePlanTool(),
+            AskUserTool(),
         ]
     }
 

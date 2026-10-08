@@ -12,6 +12,9 @@ struct SettingsView: View {
     @State private var endpointURL: String
     @State private var modelName: String
     @State private var maxContextTokensK: Int
+    /// 最大输出 token（0 = 自动），仅 Anthropic 格式生效。
+    @State private var maxOutputTokens: Int
+    @State private var thinkingLevel: AIThinkingLevel
     @State private var apiFormat: APIFormat
     @State private var permissionLevel: PermissionLevel
     @State private var webSearchEnabled: Bool
@@ -36,6 +39,8 @@ struct SettingsView: View {
             || endpointURL != savedSettings.endpointURL
             || modelName != savedSettings.modelName
             || maxContextTokensK != savedSettings.maxContextTokensK
+            || maxOutputTokens != savedSettings.maxOutputTokens
+            || thinkingLevel != savedSettings.thinkingLevel
             || apiFormat != savedSettings.apiFormat
             || permissionLevel != savedSettings.permissionLevel
             || webSearchEnabled != savedWebSearchSettings.isEnabled
@@ -63,6 +68,8 @@ struct SettingsView: View {
         _endpointURL = State(initialValue: settings.endpointURL)
         _modelName = State(initialValue: settings.modelName)
         _maxContextTokensK = State(initialValue: settings.maxContextTokensK)
+        _maxOutputTokens = State(initialValue: settings.maxOutputTokens)
+        _thinkingLevel = State(initialValue: settings.thinkingLevel)
         _apiFormat = State(initialValue: settings.apiFormat)
         _permissionLevel = State(initialValue: settings.permissionLevel)
         _webSearchEnabled = State(initialValue: webSearchSettings.isEnabled)
@@ -151,6 +158,8 @@ struct SettingsView: View {
         .onChange(of: endpointURL) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: modelName) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: maxContextTokensK) { reportUnsavedChanges = hasUnsavedChanges }
+        .onChange(of: maxOutputTokens) { reportUnsavedChanges = hasUnsavedChanges }
+        .onChange(of: thinkingLevel) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: apiFormat) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: permissionLevel) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: webSearchEnabled) { reportUnsavedChanges = hasUnsavedChanges }
@@ -282,6 +291,33 @@ struct SettingsView: View {
                 Text(String(localized: "K tokens", bundle: LanguageSettings.currentBundle))
                     .foregroundStyle(.secondary)
             }
+
+            if apiFormat == .anthropic {
+                HStack {
+                    Text(String(localized: "Max Output", bundle: LanguageSettings.currentBundle))
+                    Spacer()
+                    TextField(
+                        String(localized: "Auto", bundle: LanguageSettings.currentBundle),
+                        text: maxOutputTokensText
+                    )
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                    Text(String(localized: "tokens", bundle: LanguageSettings.currentBundle))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Picker(
+                String(localized: "Thinking Level", bundle: LanguageSettings.currentBundle),
+                selection: $thinkingLevel
+            ) {
+                ForEach(AIThinkingLevel.allCases, id: \.self) { level in
+                    Text(verbatim: level.displayName).tag(level)
+                }
+            }
         } header: {
             Text(String(localized: "AI Service", bundle: LanguageSettings.currentBundle))
         } footer: {
@@ -298,8 +334,44 @@ struct SettingsView: View {
                         bundle: LanguageSettings.currentBundle
                     )
                 )
+                Text(
+                    String(
+                        localized: "Thinking Level: “Model Default” sends no thinking parameters. Higher levels can help on hard tasks but respond slower and use more tokens.",
+                        bundle: LanguageSettings.currentBundle
+                    )
+                )
+                if apiFormat == .anthropic {
+                    Text(
+                        String(
+                            localized: "Max Output: leave empty to choose automatically by model (32K for Claude 4.6 and newer, 16K for older Claude 4 models, 8K otherwise).",
+                            bundle: LanguageSettings.currentBundle
+                        )
+                    )
+                }
+                if let window = AnthropicModelCapabilities.contextWindow(for: modelName) {
+                    Text(
+                        String(
+                            format: String(
+                                localized: "Max Context: this model has a %@-token context window. Larger values are capped automatically to leave room for the reply.",
+                                bundle: LanguageSettings.currentBundle
+                            ),
+                            DirectContextUsage.compact(window)
+                        )
+                    )
+                }
             }
         }
+    }
+
+    /// 最大输出 token 的文本绑定：空串 ↔ 0（自动），只接受数字。
+    private var maxOutputTokensText: Binding<String> {
+        Binding(
+            get: { maxOutputTokens > 0 ? String(maxOutputTokens) : "" },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                maxOutputTokens = Int(digits.prefix(7)) ?? 0
+            }
+        )
     }
 
     private var permissionLevelSection: some View {
@@ -411,10 +483,13 @@ struct SettingsView: View {
             modelName: modelName,
             maxContextTokensK: max(maxContextTokensK, 1),
             apiFormat: apiFormat,
-            permissionLevel: permissionLevel
+            permissionLevel: permissionLevel,
+            maxOutputTokens: maxOutputTokens > 0 ? max(maxOutputTokens, 1024) : 0,
+            thinkingLevel: thinkingLevel
         )
         settings.save()
         savedSettings = settings
+        maxOutputTokens = settings.maxOutputTokens
         savedWebSearchSettings = webSearchSettings
         webSearchAPIKeys = webSearchSettings.apiKeys
         reportUnsavedChanges = false
@@ -426,6 +501,8 @@ struct SettingsView: View {
         endpointURL = savedSettings.endpointURL
         modelName = savedSettings.modelName
         maxContextTokensK = savedSettings.maxContextTokensK
+        maxOutputTokens = savedSettings.maxOutputTokens
+        thinkingLevel = savedSettings.thinkingLevel
         apiFormat = savedSettings.apiFormat
         permissionLevel = savedSettings.permissionLevel
         webSearchEnabled = savedWebSearchSettings.isEnabled

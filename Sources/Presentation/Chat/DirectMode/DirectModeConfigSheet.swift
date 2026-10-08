@@ -15,10 +15,15 @@ struct DirectModeConfigSheet: View {
     let onSetMode: (String) -> Void
     let onSetConfig: (SessionConfigId, SessionConfigOptionValue) -> Void
     let onExecuteCommand: (String) -> Void
+    /// 代理上报的上下文用量（仅部分 ACP 代理提供）。
+    var contextUsage: DirectContextUsage? = nil
 
     var body: some View {
         NavigationStack {
             List {
+                if let contextUsage, let fraction = contextUsage.fraction {
+                    usageSection(contextUsage, fraction: fraction)
+                }
                 if hasConfigSection {
                     configSection
                 }
@@ -121,6 +126,22 @@ struct DirectModeConfigSheet: View {
             return opts
         case .grouped(let groups):
             return groups.flatMap { $0.options }
+        }
+    }
+
+    // MARK: - 上下文用量 Section
+
+    private func usageSection(_ usage: DirectContextUsage, fraction: Double) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: fraction)
+                    .tint(fraction > 0.85 ? .orange : .accentColor)
+                Text(verbatim: "\(Int((fraction * 100).rounded()))% · \(DirectContextUsage.compact(usage.used)) / \(DirectContextUsage.compact(usage.size))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(String(localized: "Context Used", bundle: LanguageSettings.currentBundle))
         }
     }
 

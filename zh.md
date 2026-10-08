@@ -34,7 +34,7 @@ ConchTalk 当前支持两种工作模式：
 1. **用户自有 AI API**
    用户必须配置自己的 endpoint、API key 和 model，支持 OpenAI Compatible 和 Anthropic 风格接口，不存在 ConchTalk 托管的兜底路线。
 2. **直连代理模式**
-   如果远程服务器上已存在兼容代理，ConchTalk 可以直接通过 SSH 与该代理通信，无需在服务器上安装任何守护进程或中继服务。
+   如果远程服务器上已存在兼容代理，ConchTalk 可以直接通过 SSH 与该代理通信，无需在服务器上安装任何守护进程或中继服务。14 天内重新连接会恢复上一次代理会话（ACP `session/resume` / `session/load`、Claude Code `--resume`、Codex `thread/resume`），清除上下文则开始新会话；ACP 代理上报 `usage_update` 时，直连设置面板会显示代理上下文窗口的占用情况。
 
 当前代码内置支持或可探测的代理（列表非穷举），例如：
 
@@ -69,6 +69,17 @@ ConchTalk 不运营用于接收、代理或同步应用数据的后端。网络�
 - 优先通过 tmux 管理长时间运行任务
 - 在检测到更合适的远程代理时建议切换到直连模式
 - 持久化服务器信息、聊天记录与记忆内容，便于后续接续工作
+- 多步任务实时显示计划清单（`update_plan`）；需要你做决定时以可点选项提问（`ask_user`）
+- 离开 App 后任务继续运行：前台发起的任务交给 iOS 持续处理（`BGContinuedProcessingTask`，iOS 26+），系统界面显示进度并提供停止按钮
+- 只读读取服务器上的 `~/AGENTS.md` 以及 `~/.agents/skills/*/SKILL.md` 的 name / description（每次连接读取一次），作为服务器参考上下文
+- 自动管理长对话上下文：超长工具输出保留首尾，较早的工具结果按批清理（对 prompt cache 友好），上下文预算自动限制在「模型上下文窗口 − 回复预算」以内
+- 同一次模型响应中连续的只读工具调用并行执行（最多 4 个）；写操作、审批与特殊工具保持串行且顺序不变
+
+### AI 设置
+
+- **最大输出**：回复 token 预算（`max_tokens`）。如果回复在工具调用中途被截断，ConchTalk 会告知模型，而不是执行不完整的调用。
+- **思考力度**：Claude 模型的扩展思考 / effort。按 Anthropic API 要求，在工具轮次之间回放思考块及其签名。
+- **最大上下文**：Claude 模型会在设置页脚显示其上下文窗口（200K 或 1M），超出部分自动截断。
 
 ## 内置工具
 
@@ -86,6 +97,8 @@ ConchTalk 不运营用于接收、代理或同步应用数据的后端。网络�
 - `suggest_agent_connection`
 - `activate_skill`
 - `dispatch_subagent`
+- `update_plan`（在对话中以清单展示代理的计划，无需审批）
+- `ask_user`（向你提一个问题，可附最多 6 个选项，并结束本轮直到你回复）
 
 按上下文注入的记忆工具：
 
@@ -98,7 +111,7 @@ ConchTalk 不运营用于接收、代理或同步应用数据的后端。网络�
 
 - **预置角色**：`explorer`（只读远程文件系统与系统环境探查）、`ops-diagnostician`（只读远程诊断）以及兜底的 `general-purpose`
 - **并行执行**：互相独立的子任务可在并发上限内同时运行
-- **权限继承**：subagent 继承父任务的权限级别，并以父工具表为基础按角色白名单裁剪；始终移除 `dispatch_subagent`，防止嵌套分派
+- **权限继承**：subagent 继承父任务的权限级别，并以父工具表为基础按角色白名单裁剪；始终移除 `dispatch_subagent`（防止嵌套分派）以及仅限主 agent 使用的 `update_plan`、`ask_user`
 - **确认串行冒泡**：并行 subagent 若触发确认请求，会逐个进入同一套审批 UI
 - **上下文隔离**：主对话只看到每个 subagent 的最终结论卡片
 
@@ -119,6 +132,8 @@ ConchTalk 不运营用于接收、代理或同步应用数据的后端。网络�
 - `permissive`：读写操作可自动执行，但 `forbidden` 操作仍会被禁止
 
 额外安全约束：`web_search` 由 App 使用 Keychain 中的用户 Key 直接请求所选的 Brave、Exa、AnySearch 或 Tavily 服务；关闭或未配置 Key 时，不会向模型暴露该工具。
+
+并行工具调用：只有安全闸门本来就会自动执行的调用（白名单只读工具且参数判定为 `safe`）才会并发执行；遇到写操作、需要审批的调用或其他工具时并行批次立即结束，其后的调用不会在你审批前执行。`strict` 模式下从不并行。服务器的 `~/AGENTS.md` 与 skills 摘要和其他服务器数据一样，作为不可信参考数据传给模型，不能授予权限或绕过审批。
 
 ## 架构概览
 

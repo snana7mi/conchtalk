@@ -327,7 +327,13 @@ struct ChatMessageListView: View {
                                 agentType: nil,
                                 modeColors: viewModel.directModePresentation.modeColors,
                                 presentationState: viewModel.directModePresentation,
-                                onServerAvatarTap: onServerAvatarTap
+                                onServerAvatarTap: onServerAvatarTap,
+                                onAnswerQuestion: viewModel.answerableQuestionMessageID == message.id
+                                    ? { answer in
+                                        isNearBottom = true
+                                        viewModel.answerQuestion(answer)
+                                    }
+                                    : nil
                             )
                             .opacity(isQueued ? 0.5 : (isBeforeBreak ? 0.6 : 1.0))
                             .contextMenu(menuItems: {

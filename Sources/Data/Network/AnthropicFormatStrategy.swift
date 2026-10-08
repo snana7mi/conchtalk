@@ -9,8 +9,61 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
     /// 因此由调用方按端点决定，见 `supportsAutomaticPromptCaching(endpointURL:)`。
     let automaticPromptCaching: Bool
 
-    init(automaticPromptCaching: Bool = false) {
+    /// 用户指定的 max_tokens；nil 表示按模型自动（见 `AnthropicModelCapabilities.defaultMaxOutputTokens`）。
+    let maxOutputTokens: Int?
+
+    /// 思考力度；`.modelDefault` 时不发送 `thinking` / `output_config`，沿用模型默认。
+    let thinkingLevel: AIThinkingLevel
+
+    /// 强制使用的思考模式（400 自愈后切换）；nil 表示按模型名推断。
+    let thinkingModeOverride: AnthropicThinkingMode?
+
+    init(
+        automaticPromptCaching: Bool = false,
+        maxOutputTokens: Int? = nil,
+        thinkingLevel: AIThinkingLevel = .modelDefault,
+        thinkingModeOverride: AnthropicThinkingMode? = nil
+    ) {
         self.automaticPromptCaching = automaticPromptCaching
+        self.maxOutputTokens = maxOutputTokens
+        self.thinkingLevel = thinkingLevel
+        self.thinkingModeOverride = thinkingModeOverride
+    }
+
+    /// 返回切换思考模式后的副本（用于 400 自愈重试）。
+    func withThinkingMode(_ mode: AnthropicThinkingMode) -> AnthropicFormatStrategy {
+        AnthropicFormatStrategy(
+            automaticPromptCaching: automaticPromptCaching,
+            maxOutputTokens: maxOutputTokens,
+            thinkingLevel: thinkingLevel,
+            thinkingModeOverride: mode
+        )
+    }
+
+    /// 本次请求实际使用的 max_tokens。
+    func resolvedMaxTokens(model: String) -> Int {
+        maxOutputTokens ?? AnthropicModelCapabilities.defaultMaxOutputTokens(for: model)
+    }
+
+    /// 本次请求实际使用的思考模式。
+    func resolvedThinkingMode(model: String) -> AnthropicThinkingMode {
+        thinkingModeOverride ?? AnthropicModelCapabilities.thinkingMode(for: model)
+    }
+
+    /// 按思考力度向请求体写入 `thinking` / `output_config`。
+    /// - adaptive：`thinking: {type: "adaptive"}` + `output_config: {effort}`
+    /// - manual：`thinking: {type: "enabled", budget_tokens}`（预算 ≥1024 且 < max_tokens）
+    func applyThinking(to body: inout [String: Any], model: String, maxTokens: Int) {
+        guard let effort = thinkingLevel.effortValue else { return }
+        switch resolvedThinkingMode(model: model) {
+        case .adaptive:
+            body["thinking"] = ["type": "adaptive"]
+            body["output_config"] = ["effort": effort]
+        case .manual:
+            if let budget = AnthropicModelCapabilities.manualThinkingBudget(level: thinkingLevel, maxTokens: maxTokens) {
+                body["thinking"] = ["type": "enabled", "budget_tokens": budget]
+            }
+        }
     }
 
     /// 仅官方 Claude API（api.anthropic.com）启用顶层 cache_control。
@@ -44,14 +97,16 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
         let (systemText, convertedMessages) = convertMessages(messages)
         let convertedTools = convertToolDefinitions(toolDefinitions)
 
+        let maxTokens = resolvedMaxTokens(model: model)
         var body: [String: Any] = [
             "model": model,
             "messages": convertedMessages,
-            "max_tokens": 8192,
+            "max_tokens": maxTokens,
             "stream": true,
         ]
         if !systemText.isEmpty { body["system"] = systemText }
         if !convertedTools.isEmpty { body["tools"] = convertedTools }
+        applyThinking(to: &body, model: model, maxTokens: maxTokens)
         if automaticPromptCaching { body["cache_control"] = ["type": "ephemeral"] }
         return try Self.serialize(body)
     }
@@ -71,8 +126,16 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
             "max_tokens": maxTokens ?? 4096,
         ]
         if !systemText.isEmpty { body["system"] = systemText }
-        if let temperature { body["temperature"] = temperature }
-        // Anthropic 使用 thinking.budget_tokens 控制推理，reasoningEffort 暂不映射
+        // Opus 4.7+ / 5.x 等模型对任何非默认 temperature 一律返回 400，标题 / 记忆等辅助请求直接省略
+        if let temperature, !AnthropicModelCapabilities.rejectsSamplingParameters(model) {
+            body["temperature"] = temperature
+        }
+        // 辅助请求要求低推理（"none"/"low"）：在支持 effort 的模型上降到 low，
+        // 避免默认开启思考的 5.x 模型把很小的 max_tokens 全耗在思考上而没有正文
+        if let reasoningEffort, reasoningEffort == "none" || reasoningEffort == "low",
+           AnthropicModelCapabilities.supportsEffort(model) {
+            body["output_config"] = ["effort": "low"]
+        }
         return try Self.serialize(body)
     }
 
@@ -82,13 +145,9 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
         bytes: URLSession.AsyncBytes,
         continuation: AsyncStream<StreamingDelta>.Continuation
     ) async {
-        /// 按 index 追踪正在构建中的 tool_use 块
-        var toolBlocks: [Int: (id: String, name: String, jsonAccumulator: String)] = [:]
-        /// 按 index 追踪 content block 类型（"text" / "thinking" / "tool_use"）
-        var blockTypes: [Int: String] = [:]
+        // max_tokens 仅用于截断提示文案；模型名在此不可得，提示中省略具体自动值
+        var parser = AnthropicStreamParser(maxTokens: maxOutputTokens)
         var currentEvent: String?
-        /// message_start 给出输入侧用量，message_delta 给出累计输出用量；在 message_delta 时合并产出
-        var usage = StreamingTokenUsage()
 
         do {
             for try await line in bytes.lines {
@@ -109,105 +168,22 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
                     continue
                 }
 
-                switch currentEvent {
-                case "message_start":
-                    if let message = json["message"] as? [String: Any],
-                       let rawUsage = message["usage"] as? [String: Any] {
-                        usage = Self.mergeUsage(usage, with: rawUsage)
-                    }
-
-                case "ping":
-                    break
-
-                case "content_block_start":
-                    guard let index = json["index"] as? Int,
-                          let block = json["content_block"] as? [String: Any],
-                          let blockType = block["type"] as? String else { continue }
-                    blockTypes[index] = blockType
-                    if blockType == "tool_use",
-                       let id = block["id"] as? String,
-                       let name = block["name"] as? String {
-                        toolBlocks[index] = (id: id, name: name, jsonAccumulator: "")
-                    }
-
-                case "content_block_delta":
-                    guard let index = json["index"] as? Int,
-                          let delta = json["delta"] as? [String: Any],
-                          let deltaType = delta["type"] as? String else { continue }
-
-                    switch deltaType {
-                    case "text_delta":
-                        if let text = delta["text"] as? String, !text.isEmpty {
-                            continuation.yield(.content(text))
-                        }
-                    case "thinking_delta":
-                        if let thinking = delta["thinking"] as? String, !thinking.isEmpty {
-                            continuation.yield(.reasoning(thinking))
-                        }
-                    case "input_json_delta":
-                        if let partial = delta["partial_json"] as? String {
-                            toolBlocks[index]?.jsonAccumulator += partial
-                        }
-                    default:
-                        break
-                    }
-
-                case "content_block_stop":
-                    guard let index = json["index"] as? Int else { continue }
-                    // 如果是 tool_use 块，组装完整 ToolCall 并 yield
-                    if blockTypes[index] == "tool_use",
-                       let block = toolBlocks.removeValue(forKey: index) {
-                        let argsData = block.jsonAccumulator.data(using: .utf8) ?? Data()
-                        let explanation: String
-                        if let args = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
-                           let expl = args["explanation"] as? String {
-                            explanation = expl
-                        } else {
-                            explanation = block.name
-                        }
-                        let toolCall = ToolCall(
-                            id: block.id,
-                            toolName: block.name,
-                            argumentsJSON: argsData,
-                            explanation: explanation
-                        )
-                        continuation.yield(.toolCall(toolCall))
-                    }
-                    blockTypes.removeValue(forKey: index)
-
-                case "message_delta":
-                    // stop_reason 目前无需处理；usage 为累计值，合并后产出
-                    if let rawUsage = json["usage"] as? [String: Any] {
-                        usage = Self.mergeUsage(usage, with: rawUsage)
-                        if !usage.isEmpty { continuation.yield(.usage(usage)) }
-                    }
-
-                case "message_stop":
-                    continuation.yield(.done)
-                    continuation.finish()
-                    return
-
-                case "error":
-                    let message: String
-                    if let errorObj = json["error"] as? [String: Any],
-                       let msg = errorObj["message"] as? String {
-                        message = msg
-                    } else {
-                        message = "Unknown Anthropic stream error"
-                    }
-                    continuation.yield(.error(AIServiceError.apiError(statusCode: 0, message: message)))
-                    continuation.finish()
-                    return
-
-                default:
-                    break
+                // 部分兼容端点不发 event: 行，退回 data 中的 type 字段
+                let event = currentEvent ?? (json["type"] as? String)
+                for delta in parser.handle(event: event, json: json) {
+                    continuation.yield(delta)
                 }
-
                 currentEvent = nil
+                if parser.isFinished {
+                    continuation.finish()
+                    return
+                }
             }
 
-            // 如果流正常结束但未收到 message_stop，仍然完成
-            continuation.yield(.done)
+            // 流正常结束但未收到 message_stop：仍产出缓冲内容并完成
+            for delta in parser.finish() {
+                continuation.yield(delta)
+            }
             continuation.finish()
         } catch {
             continuation.yield(.error(error))
@@ -228,12 +204,16 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
 
     func parseNonStreamingContent(from data: Data) throws -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let content = json["content"] as? [[String: Any]],
-              let first = content.first,
-              let text = first["text"] as? String else {
+              let content = json["content"] as? [[String: Any]] else {
             throw AIServiceError.invalidResponse
         }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 开启思考的模型首块是 thinking，需拼接所有 text 块而不是只取第一块
+        let texts = content.compactMap { block -> String? in
+            guard (block["type"] as? String ?? "text") == "text" else { return nil }
+            return block["text"] as? String
+        }
+        guard !texts.isEmpty else { throw AIServiceError.invalidResponse }
+        return texts.joined().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func parseError(data: Data, statusCode: Int) -> AIServiceError {
@@ -266,8 +246,11 @@ nonisolated struct AnthropicFormatStrategy: APIFormatStrategy {
             case "assistant":
                 var contentBlocks: [[String: Any]] = []
 
-                // reasoning/thinking → thinking 内容块（DeepSeek/Anthropic 思考模式必需）
-                if let reasoning = msg["reasoning_content"] as? String, !reasoning.isEmpty {
+                // 优先原样回放 Anthropic 返回的 thinking / redacted_thinking 块（含 signature）；
+                // 否则退回 reasoning_content（DeepSeek 等兼容端点的思考模式需要）
+                if let verbatim = msg[MessageBuilder.anthropicThinkingBlocksKey] as? [[String: Any]], !verbatim.isEmpty {
+                    contentBlocks.append(contentsOf: verbatim)
+                } else if let reasoning = msg["reasoning_content"] as? String, !reasoning.isEmpty {
                     contentBlocks.append(["type": "thinking", "thinking": reasoning])
                 }
 

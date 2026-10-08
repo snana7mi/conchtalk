@@ -46,6 +46,12 @@ actor ACPAgentConnection: AgentConnection {
     }
 
     func connect(cwd: String) async throws -> AgentConnectionInfo {
+        try await connect(cwd: cwd, resumeSessionId: nil)
+    }
+
+    var agentSessionId: String? { sessionId?.value }
+
+    func connect(cwd: String, resumeSessionId: String?) async throws -> AgentConnectionInfo {
         configOptions = []
         availableCommands = []
         modelsInfo = nil
@@ -81,8 +87,17 @@ actor ACPAgentConnection: AgentConnection {
 
             do {
                 let initResult = try await candidateConnection.connect()
+                if let resumeSessionId,
+                   let restored = await Self.restoreSession(
+                       resumeSessionId,
+                       cwd: cwd,
+                       capabilities: initResult.agentCapabilities,
+                       connection: candidateConnection
+                   ) {
+                    return (connection: candidateConnection, initResult: initResult, session: restored, resumed: true)
+                }
                 let session = try await candidateConnection.createSession(cwd: cwd)
-                return (connection: candidateConnection, initResult: initResult, session: session)
+                return (connection: candidateConnection, initResult: initResult, session: session, resumed: false)
             } catch {
                 await candidateConnection.disconnect()
                 throw error
@@ -102,8 +117,45 @@ actor ACPAgentConnection: AgentConnection {
             models: modelsInfo,
             modes: modesInfo,
             configOptions: configOptions,
-            availableCommands: availableCommands
+            availableCommands: availableCommands,
+            resumed: outcome.resumed
         )
+    }
+
+    /// 按代理能力恢复既有会话（resume 优先，其次 load）；不支持或失败返回 nil，由调用方新建会话。
+    private static func restoreSession(
+        _ sessionId: String,
+        cwd: String,
+        capabilities: AgentCapabilities?,
+        connection: ACPClientConnection
+    ) async -> NewSessionResponse? {
+        guard let method = ACPSessionRestoreMethod.preferred(for: capabilities) else {
+            print("[ACPAgentConnection] Agent supports neither session/resume nor session/load; starting a new session")
+            return nil
+        }
+        do {
+            switch method {
+            case .resume:
+                let response = try await connection.resumeSession(sessionId: sessionId, cwd: cwd)
+                return NewSessionResponse(
+                    sessionId: SessionId(sessionId),
+                    modes: response.modes,
+                    models: response.models,
+                    configOptions: response.configOptions
+                )
+            case .load:
+                let response = try await connection.loadSession(sessionId: sessionId, cwd: cwd)
+                return NewSessionResponse(
+                    sessionId: response.sessionId ?? SessionId(sessionId),
+                    modes: response.modes,
+                    models: response.models,
+                    configOptions: response.configOptions
+                )
+            }
+        } catch {
+            print("[ACPAgentConnection] Failed to restore session \(sessionId) via \(method): \(error); starting a new session")
+            return nil
+        }
     }
 
     func sendPrompt(_ text: String) async throws {

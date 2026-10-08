@@ -46,6 +46,9 @@ final class TaskExecutionCoordinator {
     /// Live Activity 管理器（第一梯队保活）。
     let liveActivity = LiveActivityManager()
 
+    /// iOS 26 持续处理任务：用户发起的任务退到后台后继续运行（nil 时仅使用短时保活）。
+    let continuedProcessing: ContinuedProcessingKeeper?
+
     /// 通知服务。
     private let notificationService: NotificationService
 
@@ -73,7 +76,8 @@ final class TaskExecutionCoordinator {
         contextCompactor: ContextCompactor? = nil,
         keepAlive: BackgroundKeepAlive,
         notificationService: NotificationService,
-        subagentRegistry: SubagentRegistry
+        subagentRegistry: SubagentRegistry,
+        continuedProcessing: ContinuedProcessingKeeper? = nil
     ) {
         self.taskQueue = taskQueue
         self.stateStore = stateStore
@@ -86,6 +90,12 @@ final class TaskExecutionCoordinator {
         self.keepAlive = keepAlive
         self.notificationService = notificationService
         self.subagentRegistry = subagentRegistry
+        self.continuedProcessing = continuedProcessing
+        // 用户在系统持续处理 UI 中停止（或系统使其过期）→ 取消对应 AI 任务，保存部分输出。
+        continuedProcessing?.onExpired = { [weak self] serverID in
+            guard let self, self.lifecycleManager.hasActiveTask(for: serverID) else { return }
+            self.cancelTask(for: serverID)
+        }
     }
 
     // MARK: - Public API: Background Keep Alive
@@ -197,6 +207,7 @@ final class TaskExecutionCoordinator {
     func resolveToolCall(for serverID: UUID, outcome: CommandApproval) {
         reconcileExpiredApproval(for: serverID)
         resolveApprovalContinuation(for: serverID, result: outcome)
+        continuedProcessing?.setSubtitle(serverID: serverID, ContinuedProcessingKeeper.workingSubtitle)
         stateStore.updateState(for: serverID) {
             $0.pendingToolCall = nil
             $0.pendingConfirmationRequest = nil
@@ -301,6 +312,11 @@ final class TaskExecutionCoordinator {
             serverName: server.name,
             serverIconData: FlagImageRenderer.resolveServerIconData(server: server, size: 300)
         ))
+
+        // 用户在前台发起（或前台排队启动）的任务：申请持续处理，退到后台后可继续执行到完成。
+        if isAppInForeground {
+            continuedProcessing?.begin(serverID: serverID, serverName: server.name)
+        }
     }
 
     // MARK: - Internal: Task Execution
@@ -486,6 +502,7 @@ final class TaskExecutionCoordinator {
                 $0.isReasoningActive = true
             }
             self.stateStore.scheduleNotify(for: serverID)
+            self.continuedProcessing?.heartbeat(serverID: serverID)
         }
 
         useCase.onContentUpdate = { [weak self] accumulated in
@@ -495,6 +512,7 @@ final class TaskExecutionCoordinator {
                 $0.isReasoningActive = false
             }
             self.stateStore.scheduleNotify(for: serverID)
+            self.continuedProcessing?.heartbeat(serverID: serverID)
         }
 
         useCase.onAgentStreamEvents = { [weak self] events in
@@ -516,6 +534,7 @@ final class TaskExecutionCoordinator {
             guard let self, self.lifecycleManager.hasActiveTask(for: serverID) else { return }
             self.stateStore.updateState(for: serverID) { $0.liveToolOutput = output }
             self.stateStore.scheduleNotify(for: serverID)
+            self.continuedProcessing?.heartbeat(serverID: serverID)
         }
 
         useCase.onContextCompressing = { [weak self] active in
@@ -538,8 +557,13 @@ final class TaskExecutionCoordinator {
                 $0.agentStreamEvents = []
             }
             self.notifyStateChange(for: serverID)
+            self.continuedProcessing?.advance(
+                serverID: serverID,
+                subtitle: ContinuedProcessingKeeper.subtitle(for: message)
+            )
 
-            if !self.isAppInForeground {
+            // 无持续处理任务时，后台只保活到当前轮结果落盘
+            if !self.isAppInForeground, self.continuedProcessing?.isRunning(serverID: serverID) != true {
                 self.keepAlive.endBackgroundKeepAlive()
             }
         }
@@ -555,6 +579,7 @@ final class TaskExecutionCoordinator {
 
         // 更新 stateStore：同时承载 toolCall 与完整 ConfirmationRequest（预览 + 建议规则）。
         let deadline = Date().addingTimeInterval(Self.defaultApprovalTimeoutSeconds)
+        continuedProcessing?.setSubtitle(serverID: serverID, ContinuedProcessingKeeper.awaitingApprovalSubtitle)
         stateStore.updateState(for: serverID) {
             $0.pendingToolCall = request.toolCall
             $0.pendingConfirmationRequest = request
@@ -685,6 +710,7 @@ final class TaskExecutionCoordinator {
 
     private func cleanupTask(serverID: UUID) {
         cleanupContinuations(for: serverID)
+        continuedProcessing?.finish(serverID: serverID)
         lifecycleManager.cleanupTask(
             for: serverID,
             stateStore: stateStore,
@@ -717,6 +743,17 @@ final class TaskExecutionCoordinator {
     // MARK: - Post Processing
 
     /// 任务结束后善后：profile 刷新、通知发送。
+    /// 回复通知预览：本轮以 ask_user 提问结束时显示问题，否则显示最后一条 AI 回复。
+    nonisolated static func replyNotificationPreview(for resultMessages: [Message]) -> String? {
+        if let last = resultMessages.last, last.role == .command,
+           let toolCall = last.toolCall, let question = UserQuestion.from(toolCall: toolCall) {
+            return String(question.question.prefix(100))
+        }
+        guard let lastAssistant = resultMessages.last(where: { $0.role == .assistant }),
+              !lastAssistant.content.isEmpty else { return nil }
+        return String(lastAssistant.content.prefix(100))
+    }
+
     private func postProcessTask(
         serverID: UUID,
         resultMessages: [Message],
@@ -733,10 +770,7 @@ final class TaskExecutionCoordinator {
 
         // 发送 AI 回复通知（用户不在页面时）
         let needsNotification = !isAppInForeground || !stateStore.hasObserver(for: serverID)
-        if needsNotification,
-           let lastAssistant = resultMessages.last(where: { $0.role == .assistant }),
-           !lastAssistant.content.isEmpty {
-            let preview = String(lastAssistant.content.prefix(100))
+        if needsNotification, let preview = Self.replyNotificationPreview(for: resultMessages) {
             notificationService.sendReplyNotification(
                 serverName: serverName,
                 serverIconData: serverIconData,

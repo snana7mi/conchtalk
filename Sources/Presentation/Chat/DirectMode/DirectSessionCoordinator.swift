@@ -20,6 +20,8 @@ enum DirectSessionEvent: Sendable {
     case error(String)
     /// 代理请求用户审批工具调用。
     case permissionRequested(ACPPermissionRequest)
+    /// 已恢复该服务器上同一代理 / 目录的上一次会话（携带代理显示名）。
+    case sessionResumed(String)
 }
 
 /// DirectSessionCoordinator：
@@ -54,10 +56,14 @@ final class DirectSessionCoordinator {
     private var suppressedDisconnectSessionIDs: Set<ObjectIdentifier> = []
     private var activeAgentInfo: AgentInfo?
     private var lastSSHClient: SSHClient?
+    /// 会话恢复记录的作用域（服务器 ID）；nil 时不记录也不恢复。
+    private var resumeServerID: UUID?
+    private let resumeStore: DirectAgentResumeStore
 
     // MARK: - Init
 
     init(
+        resumeStore: DirectAgentResumeStore = DirectAgentResumeStore(),
         sessionFactory: @escaping SessionFactory = { agent, sshClient in
             DirectAgentSession(agentInfo: agent, sshClient: sshClient)
         }
@@ -66,6 +72,7 @@ final class DirectSessionCoordinator {
         self.events = stream
         self.eventContinuation = continuation
         self.sessionFactory = sessionFactory
+        self.resumeStore = resumeStore
     }
 
     deinit {
@@ -99,17 +106,26 @@ final class DirectSessionCoordinator {
     // MARK: - 公开 API
 
     /// 连接到指定 agent。
-    /// - Parameter currentMessageCount: 当前消息列表长度，用于后续上下文摘要提取。
-    func connect(agent: AgentInfo, cwd: String? = nil, sshClient: SSHClient? = nil, currentMessageCount: Int = 0) async {
+    /// - Parameters:
+    ///   - currentMessageCount: 当前消息列表长度，用于后续上下文摘要提取。
+    ///   - resumeServerID: 非空时按「服务器 + 代理 + 目录」恢复上一次代理会话，并记录本次会话 ID。
+    func connect(
+        agent: AgentInfo,
+        cwd: String? = nil,
+        sshClient: SSHClient? = nil,
+        currentMessageCount: Int = 0,
+        resumeServerID: UUID? = nil
+    ) async {
         beginConnecting(to: agent)
         state.cwd = cwd
         state.directModeStartMessageCount = currentMessageCount
         lastSSHClient = sshClient
+        self.resumeServerID = resumeServerID
 
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.connectSession(agent: agent, cwd: cwd, sshClient: sshClient)
+                _ = try await self.connectSession(agent: agent, cwd: cwd, sshClient: sshClient, allowResume: true)
             } catch is CancellationError {
                 self.resetToIdle()
             } catch {
@@ -281,6 +297,11 @@ final class DirectSessionCoordinator {
         directSession = nil
         state.metadata = DirectModeMetadata()
 
+        // 清空上下文：丢弃恢复记录，强制新建代理会话
+        if let resumeServerID {
+            resumeStore.clear(serverID: resumeServerID, agentType: agent.type, cwd: state.cwd)
+        }
+
         let savedToken = state.currentSessionToken
         if savedToken != nil {
             beginConnecting(to: agent, displayName: state.activeAgent?.name)
@@ -292,7 +313,8 @@ final class DirectSessionCoordinator {
             _ = try await connectSession(
                 agent: agent,
                 cwd: state.cwd,
-                sshClient: lastSSHClient
+                sshClient: lastSSHClient,
+                allowResume: false
             )
             return true
         } catch {
@@ -472,13 +494,20 @@ final class DirectSessionCoordinator {
     private func connectSession(
         agent: AgentInfo,
         cwd: String?,
-        sshClient: SSHClient?
+        sshClient: SSHClient?,
+        allowResume: Bool
     ) async throws -> String {
         let session = sessionFactory(agent, sshClient)
         await installSessionHandlers(on: session)
 
+        let resumeID: String? = if allowResume, let resumeServerID {
+            resumeStore.sessionId(serverID: resumeServerID, agentType: agent.type, cwd: cwd)
+        } else {
+            nil
+        }
+
         do {
-            let displayName = try await session.connect(cwd: cwd)
+            let displayName = try await session.connect(cwd: cwd, resumeSessionId: resumeID)
             guard !Task.isCancelled else {
                 suppressNextDisconnectCallback(for: session)
                 await session.disconnect()
@@ -487,6 +516,14 @@ final class DirectSessionCoordinator {
 
             directSession = session
             activeAgentInfo = agent
+
+            // 记录本次代理会话 ID，供下次进入直连模式时恢复
+            if let resumeServerID, let agentSessionId = await session.agentSessionId {
+                resumeStore.save(agentSessionId, serverID: resumeServerID, agentType: agent.type, cwd: cwd)
+            }
+            if resumeID != nil, await session.didResumeSession {
+                eventContinuation.yield(.sessionResumed(displayName))
+            }
 
             if let sessionToken = state.currentSessionToken {
                 markConnected(displayName: displayName, sessionToken: sessionToken)
@@ -561,6 +598,11 @@ final class DirectSessionCoordinator {
     private func handleSessionUpdate(_ update: SessionUpdate, sessionID: ObjectIdentifier) {
         guard let directSession else { return }
         guard sessionIdentity(directSession) == sessionID else { return }
+        if case .usageUpdate(let usage) = update {
+            state.metadata.contextUsage = DirectContextUsage(used: usage.used, size: usage.size)
+            eventContinuation.yield(.metadataUpdated(state.metadata))
+            return
+        }
         guard let event = AgentStreamEvent.from(update) else { return }
         state.accumulatedEvents.append(event)
         eventContinuation.yield(.streamUpdate(event))

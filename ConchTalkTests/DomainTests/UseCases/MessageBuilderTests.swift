@@ -65,7 +65,7 @@ struct MessageBuilderTests {
         let toolMessage = result[1]
         let content = toolMessage["content"] as? String ?? ""
         #expect(content.count < 35_000)
-        #expect(content.contains("truncated"))
+        #expect(content.contains("characters omitted from the middle"))
     }
 
     @Test("loading 消息被过滤")

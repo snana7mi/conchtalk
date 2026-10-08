@@ -131,6 +131,8 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
 
     func execute(userMessage: String, conversationHistory: [Message], serverContext: String) async throws -> [Message] {
         var newMessages: [Message] = []
+        // 防御：同一实例被复用时不得消费上一次执行遗留的并行预执行结果
+        prefetchedResults.removeAll()
 
         // 获取服务器能力，用于过滤 AI 可见的工具列表
         let capabilities = await sshClient.serverCapabilities
@@ -190,6 +192,26 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
             case .toolCall(let toolCall, let reasoning):
                 // Each round's reasoning is attached to its own message
                 let roundReasoning = reasoning
+
+                // MARK: 输出被 max_tokens 截断的工具调用
+                // 参数 JSON 不完整，不能执行也不应询问审批；把原因作为工具结果回填，让模型拆小后重试。
+                if toolCall.isTruncated {
+                    let truncatedOutput = Self.truncatedToolCallOutput
+                    let cmdMsg = Message(
+                        role: .command,
+                        content: toolCall.explanation,
+                        toolCall: toolCall,
+                        toolOutput: truncatedOutput,
+                        reasoningContent: roundReasoning
+                    )
+                    newMessages.append(cmdMsg)
+                    history.append(cmdMsg)
+                    await onIntermediateMessage?(cmdMsg)
+                    response = try await nextResponseAfterToolResult(
+                        output: truncatedOutput, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
+                    )
+                    continue
+                }
 
                 // MARK: suggest_agent_connection 拦截
                 if toolCall.toolName == "suggest_agent_connection" {
@@ -286,6 +308,48 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     continue
                 }
 
+                // MARK: update_plan 拦截
+                // 纯展示工具，无远端副作用：不走审批（严格模式下也不弹窗），落计划卡片后继续。
+                if toolCall.toolName == UpdatePlanTool.toolName,
+                   toolRegistry.tool(named: toolCall.toolName) != nil {
+                    let output: String
+                    switch AgentPlanUpdate.parse((try? toolCall.decodedArguments()) ?? [:]) {
+                    case .success(let update): output = update.modelAcknowledgement
+                    case .failure(let error): output = "ERROR: \(error.message)"
+                    }
+                    let planMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: output, reasoningContent: roundReasoning)
+                    newMessages.append(planMsg)
+                    history.append(planMsg)
+                    await onIntermediateMessage?(planMsg)
+                    response = try await nextResponseAfterToolResult(
+                        output: output, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
+                    )
+                    continue
+                }
+
+                // MARK: ask_user 拦截
+                // 落问题卡片（可点选项）并结束本轮；用户的回答作为下一条用户消息进入下一轮。
+                if toolCall.toolName == AskUserTool.toolName,
+                   toolRegistry.tool(named: toolCall.toolName) != nil {
+                    guard let question = UserQuestion.parse((try? toolCall.decodedArguments()) ?? [:]) else {
+                        let output = "ERROR: 'question' must be a non-empty string."
+                        let errorMsg = Message(role: .command, content: toolCall.explanation, toolCall: toolCall, toolOutput: output, reasoningContent: roundReasoning)
+                        newMessages.append(errorMsg)
+                        history.append(errorMsg)
+                        await onIntermediateMessage?(errorMsg)
+                        response = try await nextResponseAfterToolResult(
+                            output: output, toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
+                        )
+                        continue
+                    }
+                    let questionMsg = Message(role: .command, content: question.question, toolCall: toolCall, toolOutput: question.modelAcknowledgement, reasoningContent: roundReasoning)
+                    newMessages.append(questionMsg)
+                    await onIntermediateMessage?(questionMsg)
+                    // 同一响应中排在提问之后的调用不再执行（它们依赖用户的回答）。
+                    pendingToolCalls.removeAll()
+                    return newMessages
+                }
+
                 // 错误分支：工具未注册，回填错误给模型并继续下一轮。
                 guard let tool = toolRegistry.tool(named: toolCall.toolName) else {
                     let errorMsg = Message(role: .system, content: "Unknown tool: \(toolCall.toolName)")
@@ -323,8 +387,19 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     continue
                 }
 
+                // MARK: 并行只读预执行
+                // 同一响应中从当前调用开始连续的只读调用并行执行，结果按原顺序逐条回填（UI 与模型看到的顺序不变）；
+                // 写操作 / 需审批 / 特殊工具不参与并行，仍按顺序串行执行，审批顺序不变。
+                if prefetchedResults[toolCall.id] == nil {
+                    await prefetchParallelReadOnlyRun(startingWith: toolCall)
+                }
+
                 // MARK: 安全门评估：分级校验 + 权限映射 + 执行
-                let gateResult = await ToolSafetyGate.evaluate(
+                let gateResult: ToolGateResult
+                if let prefetched = prefetchedResults.removeValue(forKey: toolCall.id) {
+                    gateResult = prefetched
+                } else {
+                    gateResult = await ToolSafetyGate.evaluate(
                     toolCall: toolCall,
                     tool: tool,
                     arguments: arguments,
@@ -338,7 +413,8 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                     },
                     onOutput: { [onToolOutputUpdate] output in onToolOutputUpdate?(output) },
                     onAgentEvents: { [onAgentStreamEvents] events in onAgentStreamEvents?(events) }
-                )
+                    )
+                }
 
                 switch gateResult {
                 case .executed(let result, let hadWrite):
@@ -457,6 +533,89 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
         return newMessages
     }
 
+    // MARK: - Parallel Read-Only Calls
+
+    /// 允许并行预执行的只读工具（仍需本次参数被工具判定为 `.safe`）。
+    static let parallelSafeToolNames: Set<String> = [
+        "read_file", "glob", "grep", "web_search", "web_fetch", "memory_read", "execute_ssh_command",
+    ]
+    /// 单批并行的最大调用数。
+    static let maxParallelReadOnlyCalls = 4
+
+    /// 是否可与相邻只读调用并行：只读工具 + 本次参数判定为 safe + 当前权限下无需确认 + 参数完整。
+    func isParallelSafe(_ call: ToolCall) -> Bool {
+        guard Self.parallelSafeToolNames.contains(call.toolName),
+              !call.isTruncated,
+              permissionLevel.effectiveSafetyLevel(.safe) == .safe,
+              let tool = toolRegistry.tool(named: call.toolName),
+              let arguments = try? preparedArguments(for: call) else { return false }
+        return permissionLevel.effectiveSafetyLevel(tool.validateSafety(arguments: arguments)) == .safe
+    }
+
+    /// 解码参数并注入内部参数（与串行路径一致）。
+    private func preparedArguments(for call: ToolCall) throws -> [String: Any] {
+        var arguments = try call.decodedArguments()
+        if let serverID {
+            arguments["_serverID"] = serverID.uuidString
+        }
+        if !attachments.isEmpty {
+            arguments["_attachments"] = attachments
+        }
+        return arguments
+    }
+
+    /// 从 `first` 开始取同一响应中连续的只读调用（≥2 条时）并行执行，结果存入 `prefetchedResults`。
+    /// 第一条调用的实时输出照常推给 UI，其余静默执行。
+    private func prefetchParallelReadOnlyRun(startingWith first: ToolCall) async {
+        guard !pendingToolCalls.isEmpty, isParallelSafe(first) else { return }
+        var run = [first]
+        for call in pendingToolCalls {
+            guard run.count < Self.maxParallelReadOnlyCalls, isParallelSafe(call) else { break }
+            run.append(call)
+        }
+        guard run.count >= 2 else { return }
+
+        let liveOutput: @MainActor @Sendable (String) -> Void = { @MainActor [onToolOutputUpdate] output in
+            onToolOutputUpdate?(output)
+        }
+        let silentOutput: @MainActor @Sendable (String) -> Void = { @MainActor _ in }
+        let results = await withTaskGroup(of: (String, ToolGateResult).self) { group in
+            for (index, call) in run.enumerated() {
+                let onOutput = index == 0 ? liveOutput : silentOutput
+                group.addTask { [self] in
+                    guard let tool = self.toolRegistry.tool(named: call.toolName),
+                          let arguments = try? self.preparedArguments(for: call) else {
+                        return (call.id, .executionError("ERROR: Invalid arguments"))
+                    }
+                    let result = await ToolSafetyGate.evaluate(
+                        toolCall: call,
+                        tool: tool,
+                        arguments: arguments,
+                        sshClient: self.sshClient,
+                        permissionLevel: self.permissionLevel,
+                        serverID: self.serverID,
+                        policyStore: self.approvalPolicyStore,
+                        previewBuilder: self.approvalPreviewBuilder,
+                        // 只读调用不会请求确认；保险起见按拒绝处理
+                        onConfirmation: { _ in .denied },
+                        onOutput: onOutput,
+                        onAgentEvents: { _ in }
+                    )
+                    return (call.id, result)
+                }
+            }
+            var collected: [String: ToolGateResult] = [:]
+            for await (id, result) in group {
+                collected[id] = result
+            }
+            return collected
+        }
+        prefetchedResults.merge(results) { _, new in new }
+    }
+
+    /// 截断工具调用回填给模型的结果（英文，模型可见）。
+    static let truncatedToolCallOutput = "ERROR: This tool call was cut off because the response reached the max output token limit before its arguments were complete, so nothing was executed. Retry with a smaller call: split large file content into several smaller write/edit calls, or shorten the command."
+
     // MARK: - Streaming Helper
 
     /// 消费 `StreamingDelta` 流并聚合为单次 `AIResponse`。
@@ -466,6 +625,8 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     /// - Side Effects: 逐段触发 `onReasoningUpdate` / `onContentUpdate` 回调。
     /// 待处理的剩余 tool call 队列（当模型一次返回多个 tool_calls 时使用）。
     private var pendingToolCalls: [ToolCall] = []
+    /// 并行预执行的只读调用结果（按 call id），按原顺序逐条消费。
+    private var prefetchedResults: [String: ToolGateResult] = [:]
 
     /// 工具执行结果回填后决定下一步：若队列中还有待处理的 tool call 则直接返回，否则请求 AI。
     /// 请求 AI 前做循环内压缩重估（修改调用方的 history）。

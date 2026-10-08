@@ -743,10 +743,11 @@ struct ExecuteNaturalLanguageCommandUseCaseTests {
     @Test("循环中段历史超限时触发压缩")
     func loopCompactsWhenHistoryGrowsMidTask() async throws {
         // 每轮工具输出 7_900 ASCII 字符 ≈ 1_975 token（低于实体 8K 截断，数学精确）；
-        // 窗口 45_000，reserve 20_000 → 估算超过 25_000（约第 13 轮）后剩余预算 < 20k，
-        // 且历史超过 recentTokenBudget(20k)，压缩在循环中段真实触发并裁剪头部
+        // 旧结果清理（ToolResultContextPolicy）后估算只计最近约 8~11 条完整输出 + 存根，
+        // 窗口 35_000，reserve 20_000 → 估算超过 15_000 后剩余预算 < 20k；
+        // 原始历史超过 recentTokenBudget(20k) 后压缩在循环中段真实触发并裁剪头部
         let (useCase, aiService) = makeCompactingUseCase(
-            toolOutputChars: 7_900, maxContextTokens: 45_000, rounds: 15)
+            toolOutputChars: 7_900, maxContextTokens: 35_000, rounds: 15)
 
         var compressingEvents: [Bool] = []
         useCase.onContextCompressing = { compressingEvents.append($0) }

@@ -84,7 +84,8 @@ extension ChatView {
                         viewModel.showDirectModeConfigSheet = false
                         viewModel.inputText = "/\(name)"
                         viewModel.sendMessage()
-                    }
+                    },
+                    contextUsage: viewModel.directSessionCoordinator.state.metadata.contextUsage
                 )
                 .presentationDetents([.medium, .large])
             }

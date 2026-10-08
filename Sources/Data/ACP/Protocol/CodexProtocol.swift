@@ -245,6 +245,16 @@ extension CodexRPCRequest {
         ])
     }
 
+    /// thread/resume：按 thread ID 重新打开已保存的会话，之后的 turn/start 追加到该 thread。
+    /// 与 thread/start 一样显式传 cwd 与 approvalPolicy（覆盖持久化值，保持 App 审批流程一致）。
+    static func threadResume(id: Int, threadId: String, cwd: String) -> CodexRPCRequest {
+        CodexRPCRequest(id: id, method: "thread/resume", params: [
+            "threadId": .string(threadId),
+            "cwd": .string(cwd),
+            "approvalPolicy": .string(CodexApprovalPolicy.onRequest)
+        ])
+    }
+
     static func turnStart(
         id: Int,
         threadId: String,

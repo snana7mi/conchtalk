@@ -150,7 +150,23 @@ actor CodexConnection: AgentConnection {
         permissionRequestHandler = handler
     }
 
+    var agentSessionId: String? { threadId }
+
     func connect(cwd: String) async throws -> AgentConnectionInfo {
+        try await connect(cwd: cwd, resumeSessionId: nil)
+    }
+
+    /// 从 thread/start 或 thread/resume 的响应中提取 thread ID。
+    nonisolated static func threadId(from response: CodexRPCResponse) -> String? {
+        guard response.error == nil,
+              let result = response.result,
+              case .object(let obj) = result,
+              case .object(let thread) = obj["thread"],
+              case .string(let tid) = thread["id"] else { return nil }
+        return tid
+    }
+
+    func connect(cwd: String, resumeSessionId: String?) async throws -> AgentConnectionInfo {
         let proc = SSHProcessTransport(sshClient: sshClient, command: "codex app-server")
         try await proc.start()
         self.transport = proc
@@ -189,14 +205,26 @@ actor CodexConnection: AgentConnection {
         self.modelsInfo = modelsInfo
         self.modesInfo = modesInfo
 
+        // 恢复既有 thread（失败时退回新建）
+        var resumed = false
+        if let resumeSessionId, AgentSessionIdValidator.isSafe(resumeSessionId) {
+            let resumeResp = try await sendRPCWithIterator(
+                .threadResume(id: allocRpcId(), threadId: resumeSessionId, cwd: cwd),
+                iterator: &iterator
+            )
+            if let tid = Self.threadId(from: resumeResp) {
+                self.threadId = tid
+                resumed = true
+            } else {
+                print("[CodexConnection] thread/resume failed: \(resumeResp.error?.message ?? "no thread in response"); starting a new thread")
+            }
+        }
+
         // 创建 thread
-        let threadResp = try await sendRPCWithIterator(.threadStart(id: allocRpcId(), cwd: cwd), iterator: &iterator)
-        // 从 RPC 响应中提取 thread ID
-        if let result = threadResp.result,
-           case .object(let obj) = result,
-           case .object(let thread) = obj["thread"],
-           case .string(let tid) = thread["id"] {
-            self.threadId = tid
+        if !resumed {
+            let threadResp = try await sendRPCWithIterator(.threadStart(id: allocRpcId(), cwd: cwd), iterator: &iterator)
+            // 从 RPC 响应中提取 thread ID
+            self.threadId = Self.threadId(from: threadResp)
         }
 
         // 保存 skills 为 availableCommands
@@ -211,7 +239,8 @@ actor CodexConnection: AgentConnection {
             models: modelsInfo,
             modes: modesInfo,
             configOptions: [],
-            availableCommands: commands
+            availableCommands: commands,
+            resumed: resumed
         )
     }
 

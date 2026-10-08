@@ -4,6 +4,56 @@ import Foundation
 
 nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
 
+    /// 主循环流式请求的 `reasoning_effort`（用户在设置中选择思考力度时才发送）；nil 不发送。
+    let reasoningEffort: String?
+
+    init(reasoningEffort: String? = nil) {
+        self.reasoningEffort = reasoningEffort
+    }
+
+    /// 返回去掉 reasoning_effort 的副本（端点 400 拒绝该参数时自愈重试）。
+    func withoutReasoningEffort() -> OpenAIFormatStrategy {
+        OpenAIFormatStrategy(reasoningEffort: nil)
+    }
+
+    /// 剔除消息上的私有键（`_` 前缀，如 Anthropic thinking 块），避免严格的兼容端点报未知字段。
+    static func sanitizedMessages(_ messages: [[String: Any]]) -> [[String: Any]] {
+        messages.map { message in
+            guard message.keys.contains(where: { $0.hasPrefix("_") }) else { return message }
+            return message.filter { !$0.key.hasPrefix("_") }
+        }
+    }
+
+    /// 流结束后把按 index 累积的原始工具调用转换为 `ToolCall`。
+    /// `finish_reason == "length"` 时参数 JSON 不完整的调用标记为截断，交由执行层反馈给模型。
+    static func finalizeToolCalls(
+        _ raw: [(id: String?, name: String?, args: String)],
+        finishReason: String?
+    ) -> [ToolCall] {
+        raw.compactMap { tc in
+            guard let id = tc.id, let name = tc.name else { return nil }
+            // 无参数工具：部分服务商不发送 arguments，视为空对象
+            let argData = (tc.args.isEmpty ? "{}" : tc.args).data(using: .utf8) ?? Data()
+            let explanation: String
+            if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
+               let expl = args["explanation"] as? String {
+                explanation = expl
+            } else {
+                explanation = name
+            }
+            var toolCall = ToolCall(id: id, toolName: name, argumentsJSON: argData, explanation: explanation)
+            if finishReason == "length" && !toolCall.hasValidArgumentsJSON {
+                toolCall.truncatedByMaxTokens = true
+            }
+            return toolCall
+        }
+    }
+
+    /// 回复文本被截断（finish_reason=length）时追加的提示（英文：会作为 assistant 文本回放给模型）。
+    static func truncationNotice(hadText: Bool) -> String {
+        (hadText ? "\n\n" : "") + "[Reply cut off: the model reached its output token limit. Send “continue” to let it finish.]"
+    }
+
     /// 请求体序列化：`.sortedKeys` 保证字典键顺序稳定，使相同前缀的请求字节一致，
     /// 以命中 OpenAI 等服务商的自动前缀缓存（Swift 字典遍历顺序会随机化）。
     static func serialize(_ body: [String: Any]) throws -> Data {
@@ -38,7 +88,7 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
         toolDefinitions: [[String: Any]]
     ) throws -> Data {
         var body: [String: Any] = [
-            "messages": messages,
+            "messages": Self.sanitizedMessages(messages),
             "stream": true,
         ]
         if !model.isEmpty {
@@ -46,6 +96,9 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
         }
         if !toolDefinitions.isEmpty {
             body["tools"] = toolDefinitions
+        }
+        if let reasoningEffort {
+            body["reasoning_effort"] = reasoningEffort
         }
         return try Self.serialize(body)
     }
@@ -58,7 +111,7 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
         reasoningEffort: String?
     ) throws -> Data {
         var body: [String: Any] = [
-            "messages": messages,
+            "messages": Self.sanitizedMessages(messages),
             "stream": false,
         ]
         if !model.isEmpty {
@@ -78,6 +131,8 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
         continuation: AsyncStream<StreamingDelta>.Continuation
     ) async {
         var toolCalls: [(id: String?, name: String?, args: String)] = []
+        var finishReason: String?
+        var producedText = false
 
         do {
             for try await line in bytes.lines {
@@ -97,8 +152,13 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
                 }
 
                 guard let choices = json["choices"] as? [[String: Any]],
-                      let choice = choices.first,
-                      let delta = choice["delta"] as? [String: Any] else {
+                      let choice = choices.first else {
+                    continue
+                }
+                if let reason = choice["finish_reason"] as? String {
+                    finishReason = reason
+                }
+                guard let delta = choice["delta"] as? [String: Any] else {
                     continue
                 }
 
@@ -109,6 +169,7 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
 
                 // Content
                 if let content = delta["content"] as? String, !content.isEmpty {
+                    producedText = true
                     continuation.yield(.content(content))
                 }
 
@@ -141,20 +202,12 @@ nonisolated struct OpenAIFormatStrategy: APIFormatStrategy {
             }
 
             // 为每个完整的 tool call 生成独立的 .toolCall 事件
-            for tc in toolCalls {
-                if let id = tc.id,
-                   let name = tc.name,
-                   let argData = tc.args.data(using: .utf8) {
-                    let explanation: String
-                    if let args = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
-                       let expl = args["explanation"] as? String {
-                        explanation = expl
-                    } else {
-                        explanation = name
-                    }
-                    let toolCall = ToolCall(id: id, toolName: name, argumentsJSON: argData, explanation: explanation)
-                    continuation.yield(.toolCall(toolCall))
-                }
+            let finalized = Self.finalizeToolCalls(toolCalls, finishReason: finishReason)
+            for toolCall in finalized {
+                continuation.yield(.toolCall(toolCall))
+            }
+            if finalized.isEmpty && finishReason == "length" {
+                continuation.yield(.content(Self.truncationNotice(hadText: producedText)))
             }
 
             continuation.yield(.done)

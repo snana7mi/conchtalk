@@ -9,6 +9,13 @@ nonisolated protocol ProviderProfile {
     var includeReasoningOnToolCallMessages: Bool { get }
     /// 纯 assistant content 历史消息是否附带 reasoning_content。
     var includeReasoningOnPlainAssistantMessages: Bool { get }
+    /// assistant + tool_calls 历史消息是否附带原样保存的 Anthropic thinking 块。
+    var includeAnthropicThinkingBlocks: Bool { get }
+}
+
+extension ProviderProfile {
+    /// 默认回放 Anthropic thinking 块（仅 Anthropic 格式会使用，OpenAI 格式发送前剔除）。
+    nonisolated var includeAnthropicThinkingBlocks: Bool { true }
 }
 
 /// DeepSeek：只在 assistant + tool_calls 历史上带 reasoning_content。
@@ -21,6 +28,14 @@ nonisolated struct DeepSeekProfile: ProviderProfile {
 nonisolated struct DefaultProfile: ProviderProfile {
     let includeReasoningOnToolCallMessages = false
     let includeReasoningOnPlainAssistantMessages = false
+}
+
+/// 自愈「移除思考」重试：不带 reasoning_content，也不回放 thinking 块
+///（例如 thinking 块签名失效导致 400 "Invalid `signature` in `thinking` block"）。
+nonisolated struct NoReasoningProfile: ProviderProfile {
+    let includeReasoningOnToolCallMessages = false
+    let includeReasoningOnPlainAssistantMessages = false
+    let includeAnthropicThinkingBlocks = false
 }
 
 /// 根据 endpointURL / modelName 推断供应商 Profile。

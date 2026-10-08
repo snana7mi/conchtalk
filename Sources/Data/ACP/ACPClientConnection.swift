@@ -17,6 +17,35 @@ nonisolated struct SessionNewRequestPayload: Encodable, Sendable {
     }
 }
 
+/// SessionRestoreRequestPayload：
+/// `session/resume` 与 `session/load` 的请求参数（ACP 稳定规范：sessionId + cwd + mcpServers）。
+nonisolated struct SessionRestoreRequestPayload: Encodable, Sendable {
+    let sessionId: String
+    let cwd: String
+    let mcpServers: [String]
+
+    init(sessionId: String, cwd: String, mcpServers: [String] = []) {
+        self.sessionId = sessionId
+        self.cwd = cwd
+        self.mcpServers = mcpServers
+    }
+}
+
+/// ACPSessionRestoreMethod：恢复既有会话时选用的 ACP 方法。
+nonisolated enum ACPSessionRestoreMethod: Equatable, Sendable {
+    /// `session/resume`：不回放历史（需 `sessionCapabilities.resume`）。
+    case resume
+    /// `session/load`：代理会先以 session/update 回放全部历史（需 `loadSession: true`）。
+    case load
+
+    /// 按代理能力选择恢复方式：优先 resume（无回放），其次 load；都不支持返回 nil。
+    static func preferred(for capabilities: AgentCapabilities?) -> ACPSessionRestoreMethod? {
+        if capabilities?.sessionCapabilities?.resume != nil { return .resume }
+        if capabilities?.loadSession == true { return .load }
+        return nil
+    }
+}
+
 /// ACPClientConnection：管理与远端 ACP 代理的完整生命周期。
 /// 负责初始化握手、Session 管理、请求/响应 ID 匹配、通知分发。
 actor ACPClientConnection {
@@ -44,6 +73,9 @@ actor ACPClientConnection {
 
     private(set) var agentInfo: ACPModel.AgentInfo?
     private(set) var agentCapabilities: AgentCapabilities?
+
+    /// session/load 回放期间丢弃 session/update：历史已在本地聊天记录中，重复渲染会造成消息翻倍。
+    private var suppressSessionUpdates = false
 
     /// 会话更新回调：代理发送流式更新时调用。
     var sessionUpdateHandler: (@Sendable (SessionUpdate) -> Void)?
@@ -124,6 +156,29 @@ actor ACPClientConnection {
         
         let data = try JSONEncoder().encode(resultValue)
         return try JSONDecoder().decode(NewSessionResponse.self, from: data)
+    }
+
+    /// 恢复既有会话（`session/resume`，不回放历史）。
+    func resumeSession(sessionId: String, cwd: String) async throws -> ResumeSessionResponse {
+        let params = SessionRestoreRequestPayload(sessionId: sessionId, cwd: cwd)
+        guard let resultValue = try await sendRequest(method: "session/resume", params: params) else {
+            return ResumeSessionResponse()
+        }
+        let data = try JSONEncoder().encode(resultValue)
+        return (try? JSONDecoder().decode(ResumeSessionResponse.self, from: data)) ?? ResumeSessionResponse()
+    }
+
+    /// 加载既有会话（`session/load`）。代理在响应前回放的历史 update 全部丢弃。
+    func loadSession(sessionId: String, cwd: String) async throws -> LoadSessionResponse {
+        suppressSessionUpdates = true
+        defer { suppressSessionUpdates = false }
+        let params = SessionRestoreRequestPayload(sessionId: sessionId, cwd: cwd)
+        let empty = LoadSessionResponse(sessionId: SessionId(sessionId), modes: nil, models: nil, configOptions: nil)
+        guard let resultValue = try await sendRequest(method: "session/load", params: params) else {
+            return empty
+        }
+        let data = try JSONEncoder().encode(resultValue)
+        return (try? JSONDecoder().decode(LoadSessionResponse.self, from: data)) ?? empty
     }
 
     /// 发送 prompt 并等待完成。
@@ -249,7 +304,7 @@ actor ACPClientConnection {
             // 优先尝试 ACPModel 标准解码
             do {
                 let notification = try JSONDecoder().decode(SessionUpdateNotification.self, from: data)
-                sessionUpdateHandler?(notification.update)
+                deliver(notification.update)
                 return
             } catch {
                 #if DEBUG
@@ -259,7 +314,7 @@ actor ACPClientConnection {
             // Fallback：处理非标准 update 类型（thinking_chunk, text_chunk, turn_complete, end_turn 等）
             // 以及标准类型但 ContentBlock 解码失败的情况（如未知 content type）
             if let fallbackUpdate = Self.decodeFallbackUpdate(from: data) {
-                sessionUpdateHandler?(fallbackUpdate)
+                deliver(fallbackUpdate)
             } else {
                 #if DEBUG
                 let preview = String(data: data, encoding: .utf8)?.prefix(300) ?? "nil"
@@ -268,6 +323,22 @@ actor ACPClientConnection {
             }
         } catch {
             print("[ACPClientConnection] Failed to encode session/update params: \(error)")
+        }
+    }
+
+    /// 分发 update；session/load 回放期间丢弃历史内容类 update，但保留命令 / 配置 / 模式等状态类 update。
+    private func deliver(_ update: SessionUpdate) {
+        if suppressSessionUpdates && Self.isReplayedContent(update) { return }
+        sessionUpdateHandler?(update)
+    }
+
+    /// 是否为会话内容类 update（session/load 回放的历史消息、思考、工具调用、计划）。
+    nonisolated static func isReplayedContent(_ update: SessionUpdate) -> Bool {
+        switch update {
+        case .configOptionUpdate, .availableCommandsUpdate, .currentModeUpdate, .usageUpdate:
+            return false
+        default:
+            return true
         }
     }
 

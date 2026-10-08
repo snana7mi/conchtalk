@@ -172,10 +172,17 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
         }
     }
 
-    /// 构建受限工具注册表：按白名单过滤；空白名单继承父工具；永远剔除 dispatch_subagent（嵌套防护）。
+    /// 只属于主 agentic loop 的工具：子 agent 不能再派生子 agent，也不能直接向用户提问或更新用户可见的计划。
+    nonisolated static let mainLoopOnlyTools: Set<String> = [
+        DispatchSubagentTool.toolName,
+        AskUserTool.toolName,
+        UpdatePlanTool.toolName,
+    ]
+
+    /// 构建受限工具注册表：按白名单过滤；空白名单继承父工具；永远剔除主循环专属工具（嵌套防护 / 用户交互）。
     /// - Note: 设为 internal（非 private）以便单测直接验证裁剪结果。
     func makeRestrictedRegistry(for def: SubagentDefinition) -> ToolRegistry {
-        let parentTools = baseToolRegistry.tools.filter { $0.name != DispatchSubagentTool.toolName }
+        let parentTools = baseToolRegistry.tools.filter { !Self.mainLoopOnlyTools.contains($0.name) }
         if def.allowedTools.isEmpty {
             return ToolRegistry(tools: parentTools)
         }

@@ -34,7 +34,7 @@ ConchTalk currently supports two ways to work:
 1. **Your own AI API**
    Configure your own endpoint, API key, and model. OpenAI-compatible and Anthropic-style APIs are supported. There is no ConchTalk-hosted fallback.
 2. **Direct agent mode**
-   If a compatible agent is already available on the remote server, ConchTalk can connect to it directly over SSH — no daemon or relay service is installed on your server. When an agent requests tool approval via `session/request_permission` (ACP), `control_request` / `can_use_tool` (Claude Code, launched with `--permission-prompt-tool stdio`), or `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` (Codex app-server, threads started with `approvalPolicy: on-request`), the app shows a permission dialog and responds with the ACP-compliant `outcome`/`optionId` (auto-denied after 300 seconds with no action).
+   If a compatible agent is already available on the remote server, ConchTalk can connect to it directly over SSH — no daemon or relay service is installed on your server. Reconnecting within 14 days resumes the previous agent session (ACP `session/resume` or `session/load`, Claude Code `--resume`, Codex `thread/resume`); clearing the context starts a fresh one. When an ACP agent reports `usage_update`, the direct-mode sheet shows how much of the agent's context window is in use. When an agent requests tool approval via `session/request_permission` (ACP), `control_request` / `can_use_tool` (Claude Code, launched with `--permission-prompt-tool stdio`), or `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` (Codex app-server, threads started with `approvalPolicy: on-request`), the app shows a permission dialog and responds with the ACP-compliant `outcome`/`optionId` (auto-denied after 300 seconds with no action).
 
 The current codebase includes built-in support or detection for agents such as:
 
@@ -69,6 +69,17 @@ None of these flows passes through a ConchTalk account, gateway, relay, or cloud
 - Keep long-running work alive with Live Activity-powered background execution (iOS) and native background task fallback
 - Suggest switching into direct agent mode when a better remote agent is available
 - Persist server metadata, chat history, and memory for follow-up tasks
+- Show a live plan checklist for multi-step work (`update_plan`) and ask you a question with tappable answer choices when it needs a decision (`ask_user`)
+- Keep a task running after you leave the app: tasks you start in the foreground are handed to iOS continued processing (`BGContinuedProcessingTask`, iOS 26+), with progress and a Stop button in the system UI
+- Read `~/AGENTS.md` and the `name`/`description` of `~/.agents/skills/*/SKILL.md` on the server (read-only, once per connection) and include them as server reference context
+- Manage long conversations automatically: large tool outputs keep their head and tail, older tool results are cleared in batches (stable for prompt caching), and the context budget is capped to the model's context window minus the reply budget
+- Run consecutive read-only tool calls from one model response in parallel (up to 4), while writes, approvals, and special tools stay serial and in order
+
+### AI settings
+
+- **Max Output**: the reply token budget (`max_tokens`). If a reply is cut off mid tool call, ConchTalk tells the model instead of running a half-written call.
+- **Thinking Level**: extended thinking / effort for Claude models. Thinking blocks and their signatures are replayed across tool turns, as the Anthropic API requires.
+- **Max Context**: for Claude models the settings footer shows the model's context window (200K or 1M), and larger values are capped automatically.
 
 ## Built-in Tools
 
@@ -88,6 +99,8 @@ Core tools include:
 - `suggest_agent_connection`
 - `activate_skill`
 - `dispatch_subagent`
+- `update_plan` (shows the agent's plan as a checklist in the chat; no approval needed)
+- `ask_user` (asks you one question, optionally with up to 6 answer choices, and ends the turn until you reply)
 
 Contextual memory tools:
 
@@ -100,7 +113,7 @@ The main agent can offload focused subtasks to subagents via the `dispatch_subag
 
 - **Specialized roles**: `explorer` (read-only remote filesystem and system investigation), `ops-diagnostician` (read-only remote diagnosis), and a `general-purpose` role for everything else
 - **Parallel execution**: independent subtasks run concurrently under a bounded concurrency cap
-- **Inherited permissions**: a subagent inherits the parent's tools (minus `dispatch_subagent`, to prevent nesting) and permission level
+- **Inherited permissions**: a subagent inherits the parent's tools (minus `dispatch_subagent`, `update_plan`, and `ask_user`, which only the main agent may use) and permission level
 - **Serialized confirmations**: when parallel subagents need approval, requests are funneled one at a time into the same approval UI, labeled by source
 - **Context isolation**: only the final per-subagent conclusion is written back to the main conversation as a result card
 
@@ -125,6 +138,8 @@ Hardening rules applied on top of safety levels:
 - `execute_ssh_command`: any write redirection (`>`, `>>`), heredoc/herestring (`<<`), or `tee` in a whitelisted command chain always requires confirmation — the AI-reported `is_destructive` flag can only raise risk, never lower it
 - `web_fetch`: refuses to fetch non-public addresses (loopback, private ranges, link-local/cloud metadata, CGNAT, IPv6 loopback/ULA) before any remote command runs
 - `web_search`: calls the selected Brave, Exa, AnySearch, or Tavily API directly with the user's Keychain-protected key; it is absent from the model tool list while disabled or unconfigured
+- Parallel tool calls: only calls that the safety gate would auto-run (an allowlist of read-only tools whose arguments evaluate as `safe`) are run concurrently. A write, an approval prompt, or any other tool ends the parallel batch, so nothing after it runs before you approve it. `strict` mode never runs calls in parallel.
+- Server `~/AGENTS.md` and skills are passed as untrusted reference data, like other server data: they cannot grant permissions or bypass approval
 
 This keeps the assistant useful without removing user control.
 

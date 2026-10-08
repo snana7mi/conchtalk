@@ -69,9 +69,11 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
             modelName: settings.modelName,
             strategy: settings.apiFormat == .anthropic
                 ? AnthropicFormatStrategy(
-                    automaticPromptCaching: AnthropicFormatStrategy.supportsAutomaticPromptCaching(endpointURL: endpointURL)
+                    automaticPromptCaching: AnthropicFormatStrategy.supportsAutomaticPromptCaching(endpointURL: endpointURL),
+                    maxOutputTokens: settings.resolvedMaxOutputTokens(),
+                    thinkingLevel: settings.thinkingLevel
                 )
-                : OpenAIFormatStrategy()
+                : OpenAIFormatStrategy(reasoningEffort: settings.thinkingLevel.effortValue)
         )
     }
 
@@ -177,7 +179,7 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
                     switch healResult {
                     case .needsRetry(let hint):
                         let freshConfig = try await resolveRequestConfig()
-                        let healProfile: ProviderProfile = (hint == .add) ? DeepSeekProfile() : DefaultProfile()
+                        let healProfile: ProviderProfile = (hint == .add) ? DeepSeekProfile() : NoReasoningProfile()
                         await streamingExecutor.executeDirect(
                             messages: retryMessages(healProfile),
                             config: freshConfig,
@@ -187,8 +189,24 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
                     case .stream(let bytes, _):
                         await config.strategy.processSSEStream(bytes: bytes, continuation: continuation)
                     case .error(let error):
-                        continuation.yield(.error(error))
-                        continuation.finish()
+                        // 用户开启的思考参数被端点拒绝：切换 / 去掉该参数后重试一次
+                        if let fallbackStrategy = Self.thinkingFallbackStrategy(for: error, strategy: config.strategy) {
+                            let retryConfig = AIRequestConfig(
+                                endpointURL: config.endpointURL,
+                                apiKey: config.apiKey,
+                                modelName: config.modelName,
+                                strategy: fallbackStrategy
+                            )
+                            await streamingExecutor.executeDirect(
+                                messages: messages,
+                                config: retryConfig,
+                                toolDefinitions: toolDefinitions,
+                                continuation: continuation
+                            )
+                        } else {
+                            continuation.yield(.error(error))
+                            continuation.finish()
+                        }
                     }
                 } catch {
                     continuation.yield(.error(error))
@@ -197,6 +215,29 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// 400 自愈：思考配置与模型不匹配时返回调整后的策略。
+    /// - Anthropic：adaptive ↔ manual（"adaptive thinking is not supported" / "thinking.type.enabled is not supported"）。
+    /// - OpenAI 兼容：端点不认 `reasoning_effort` 时去掉该参数。
+    static func thinkingFallbackStrategy(for error: Error, strategy: APIFormatStrategy) -> APIFormatStrategy? {
+        guard case AIServiceError.apiError(let status, let message)? = error as? AIServiceError, status == 400 else {
+            return nil
+        }
+        if let anthropic = strategy as? AnthropicFormatStrategy,
+           anthropic.thinkingLevel != .modelDefault,
+           let mode = AnthropicModelCapabilities.thinkingModeFallback(from: message),
+           mode != anthropic.thinkingModeOverride {
+            print("[AIProxy] Thinking mode rejected, retrying with \(mode.rawValue) thinking")
+            return anthropic.withThinkingMode(mode)
+        }
+        if let openAI = strategy as? OpenAIFormatStrategy,
+           openAI.reasoningEffort != nil,
+           message.lowercased().contains("reasoning_effort") {
+            print("[AIProxy] reasoning_effort rejected, retrying without it")
+            return openAI.withoutReasoningEffort()
+        }
+        return nil
     }
 
     // MARK: - Message Conversion
@@ -237,7 +278,8 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
         // 历史消息转换委托给 MessageBuilder
         let options = MessageBuilderOptions(
             includeReasoningOnToolCallMessages: profile.includeReasoningOnToolCallMessages,
-            includeReasoningOnPlainAssistantMessages: profile.includeReasoningOnPlainAssistantMessages
+            includeReasoningOnPlainAssistantMessages: profile.includeReasoningOnPlainAssistantMessages,
+            includeAnthropicThinkingBlocks: profile.includeAnthropicThinkingBlocks
         )
         let historyMessages = MessageBuilder.build(from: history, options: options)
         openAIMessages.append(contentsOf: historyMessages)

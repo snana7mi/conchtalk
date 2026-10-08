@@ -101,9 +101,23 @@ actor DirectAgentSession: DirectAgentSessionType {
 
     // MARK: - 生命周期
 
+    /// 最近一次 connect 是否恢复了既有代理会话。
+    private(set) var didResumeSession = false
+
+    /// 代理侧会话标识，用于下次恢复。
+    var agentSessionId: String? {
+        get async { await agentConnection?.agentSessionId }
+    }
+
     /// 连接到代理并创建会话。返回代理显示名。
     @discardableResult
     func connect(cwd: String? = nil) async throws -> String {
+        try await connect(cwd: cwd, resumeSessionId: nil)
+    }
+
+    /// 连接到代理；`resumeSessionId` 非空时尝试恢复该会话，失败自动新建。返回代理显示名。
+    @discardableResult
+    func connect(cwd: String?, resumeSessionId: String?) async throws -> String {
         // 解析工作目录：cwd 未指定时通过 SSH 探测远端 home 目录
         // （ACP 协议的 cwd 是文件系统路径，`~` 和 `$HOME` 不会被展开）
         let resolvedCwd: String
@@ -144,10 +158,11 @@ actor DirectAgentSession: DirectAgentSessionType {
         }
 
         // 连接
-        let info = try await connection.connect(cwd: resolvedCwd)
+        let info = try await connection.connect(cwd: resolvedCwd, resumeSessionId: resumeSessionId)
 
         self.agentConnection = connection
         self.isConnected = true
+        self.didResumeSession = info.resumed
         applyInitialConnectionInfo(info)
 
         print("[DirectAgentSession] Connected to agent: \(info.displayName)")

@@ -69,9 +69,14 @@ nonisolated enum ClaudeCodeMessageTranslator {
 nonisolated enum ClaudeCodeCommandBuilder {
     /// --permission-prompt-tool stdio：需要授权的工具调用以 control_request(can_use_tool) 经 stdout 发给本端，
     /// 由 App 权限 UI 决定后回写 control_response（与官方 Agent SDK 的 canUseTool 机制相同）。
-    static func launchCommand(cwd: String) -> String {
+    /// - Parameter resumeSessionId: 非空且通过安全校验时追加 `--resume <id>`，在原会话上继续（CLI 默认沿用原 session ID）。
+    static func launchCommand(cwd: String, resumeSessionId: String? = nil) -> String {
         let escapedCwd = cwd.replacingOccurrences(of: "'", with: "'\\''")
-        return "sh -c 'cd \"\(escapedCwd)\" && exec claude -p --output-format stream-json --input-format stream-json --verbose --permission-prompt-tool stdio'"
+        var resumeFlag = ""
+        if let resumeSessionId, AgentSessionIdValidator.isSafe(resumeSessionId) {
+            resumeFlag = " --resume \(resumeSessionId)"
+        }
+        return "sh -c 'cd \"\(escapedCwd)\" && exec claude -p\(resumeFlag) --output-format stream-json --input-format stream-json --verbose --permission-prompt-tool stdio'"
     }
 }
 
@@ -124,11 +129,31 @@ actor ClaudeCodeConnection: AgentConnection {
 
     // MARK: - AgentConnection
 
+    var agentSessionId: String? { sessionId.isEmpty ? nil : sessionId }
+
     func connect(cwd: String) async throws -> AgentConnectionInfo {
-        print("[ClaudeCodeConnection] connect() called, cwd=\(cwd)")
+        try await connect(cwd: cwd, resumeSessionId: nil)
+    }
+
+    /// 带 `--resume` 启动；会话不存在等原因导致 CLI 启动失败时，自动退回新会话。
+    func connect(cwd: String, resumeSessionId: String?) async throws -> AgentConnectionInfo {
+        guard let resumeSessionId, AgentSessionIdValidator.isSafe(resumeSessionId) else {
+            return try await launch(cwd: cwd, resumeSessionId: nil)
+        }
+        do {
+            return try await launch(cwd: cwd, resumeSessionId: resumeSessionId)
+        } catch {
+            print("[ClaudeCodeConnection] Resume \(resumeSessionId) failed: \(error); starting a new session")
+            await disconnect()
+            return try await launch(cwd: cwd, resumeSessionId: nil)
+        }
+    }
+
+    private func launch(cwd: String, resumeSessionId: String?) async throws -> AgentConnectionInfo {
+        print("[ClaudeCodeConnection] connect() called, cwd=\(cwd), resume=\(resumeSessionId ?? "-")")
 
         // 启动持久 Claude Code 进程
-        let command = ClaudeCodeCommandBuilder.launchCommand(cwd: cwd)
+        let command = ClaudeCodeCommandBuilder.launchCommand(cwd: cwd, resumeSessionId: resumeSessionId)
         let proc = SSHProcessTransport(sshClient: sshClient, command: command)
         try await proc.start()
         self.transport = proc
@@ -171,7 +196,8 @@ actor ClaudeCodeConnection: AgentConnection {
             models: modelsInfo,
             modes: nil,
             configOptions: [],
-            availableCommands: commands
+            availableCommands: commands,
+            resumed: resumeSessionId != nil
         )
     }
 

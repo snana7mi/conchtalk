@@ -2,6 +2,23 @@
 import Foundation
 
 extension ChatViewModel {
+    /// 可回答的 ask_user 问题消息 ID：仅当它是最新可见消息、没有任务在运行且不在直连模式时有效。
+    var answerableQuestionMessageID: UUID? {
+        guard !isProcessing, !directSessionCoordinator.hasActiveSession,
+              let last = messages.last(where: { $0.systemMessageType != .aiContext }),
+              last.role == .command,
+              last.toolCall?.toolName == AskUserTool.toolName else { return nil }
+        return last.id
+    }
+
+    /// 点选 ask_user 选项：作为用户消息发送（保留输入框中已有附件）。
+    func answerQuestion(_ answer: String) {
+        let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, answerableQuestionMessageID != nil else { return }
+        inputText = trimmed
+        sendMessage()
+    }
+
     /// 发送消息：用户消息立即持久化，AI 任务通过 enqueueTask 委托给 TaskExecutionCoordinator。
     func sendMessage() {
         let trimmedText = inputText.trimmingCharacters(in: .whitespacesAndNewlines)

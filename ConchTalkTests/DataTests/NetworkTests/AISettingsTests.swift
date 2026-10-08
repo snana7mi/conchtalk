@@ -15,6 +15,8 @@ struct AISettingsTests {
         "aiMaxContextTokensK",
         "aiAPIFormat",
         "aiPermissionLevel",
+        "aiMaxOutputTokens",
+        "aiThinkingLevel",
     ]
 
     private func clearDefaults() {
@@ -57,5 +59,38 @@ struct AISettingsTests {
         #expect(AISettings.loadMaxContextTokens() == 128_000)
         UserDefaults.standard.set(64, forKey: "aiMaxContextTokensK")
         #expect(AISettings.loadMaxContextTokens() == 64_000)
+    }
+
+    @Test("最大输出 token 与思考力度：默认自动 / 模型默认，可保存并读回")
+    func savesOutputAndThinkingSettings() {
+        clearDefaults()
+        defer { clearDefaults() }
+        let keychain = MockKeychainService()
+
+        let defaults = AISettings.load(keychainService: keychain)
+        #expect(defaults.maxOutputTokens == 0)
+        #expect(defaults.thinkingLevel == .modelDefault)
+
+        var settings = AISettings(
+            apiKey: "k",
+            endpointURL: "https://api.anthropic.com",
+            modelName: "claude-opus-4-6",
+            maxContextTokensK: 200,
+            apiFormat: .anthropic,
+            permissionLevel: .standard
+        )
+        #expect(settings.resolvedMaxOutputTokens() == 32_000)
+        settings.maxOutputTokens = 20_000
+        settings.thinkingLevel = .high
+        settings.save(keychainService: keychain)
+
+        let loaded = AISettings.load(keychainService: keychain)
+        #expect(loaded.maxOutputTokens == 20_000)
+        #expect(loaded.thinkingLevel == .high)
+        #expect(loaded.resolvedMaxOutputTokens() == 20_000)
+
+        // 过小的用户值抬到 1024 下限
+        settings.maxOutputTokens = 100
+        #expect(settings.resolvedMaxOutputTokens() == 1024)
     }
 }
