@@ -60,6 +60,9 @@ nonisolated protocol SSHClientProtocol: Sendable {
     /// - Throws: 文件不存在或 SFTP 通道失败时抛出。
     func sftpFileSize(path: String) async throws -> UInt64
 
+    /// 通过 SFTP 列出目录。不跟随 `..` 逃逸；由调用方传入已规范化的路径。
+    func sftpListDirectory(path: String) async throws -> [RemoteFileEntry]
+
     /// 分块 SFTP 写入，支持进度回调。
     /// - Parameters:
     ///   - path: 远端文件路径。
@@ -117,6 +120,10 @@ extension SSHClientProtocol {
     }
 
     func sftpFileSize(path: String) async throws -> UInt64 {
+        throw SSHError.commandFailed("SFTP not supported")
+    }
+
+    func sftpListDirectory(path: String) async throws -> [RemoteFileEntry] {
         throw SSHError.commandFailed("SFTP not supported")
     }
 

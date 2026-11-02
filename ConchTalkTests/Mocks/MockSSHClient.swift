@@ -30,6 +30,8 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
     var sftpWriteError: Error?
     var sftpFileSizeResult: UInt64 = 0
     var sftpFileSizeError: Error?
+    var sftpListResult: [RemoteFileEntry] = []
+    var sftpListError: Error?
     var sftpWriteChunkedError: Error?
     var streamingOutput: [String] = []
     var streamingError: Error?
@@ -124,6 +126,12 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
         return sftpFileSizeResult
     }
 
+    func sftpListDirectory(path: String) async throws -> [RemoteFileEntry] {
+        callHistory.append(CallRecord(method: "sftpListDirectory", arguments: ["path": path]))
+        if let error = sftpListError { throw error }
+        return sftpListResult
+    }
+
     func sftpWriteFileChunked(
         path: String,
         data: Data,
@@ -153,6 +161,8 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
         sftpWriteError = nil
         sftpFileSizeResult = 0
         sftpFileSizeError = nil
+        sftpListResult = []
+        sftpListError = nil
         sftpWriteChunkedError = nil
         streamingOutput = []
         streamingError = nil

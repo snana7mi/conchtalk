@@ -64,6 +64,7 @@ None of these flows passes through a ConchTalk account, gateway, relay, or cloud
 - Execute AI-planned multi-step tasks with tool calls
 - Dispatch parallel subagents for specialized, context-isolated subtasks
 - Read, write, edit, search, and upload files on remote systems
+- Browse remote directories over SFTP, preview text and images, download a file, or attach it to the chat
 - Search the live web through Brave, Exa, AnySearch, or Tavily with your own provider API key
 - Fetch web content through the remote machine's network (public targets only — non-public addresses are refused to prevent SSRF)
 - Keep long-running work alive with Live Activity-powered background execution (iOS) and native background task fallback

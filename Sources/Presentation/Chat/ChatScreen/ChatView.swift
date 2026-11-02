@@ -11,6 +11,8 @@ struct ChatView: View {
 
     /// 文件选择器显示状态。
     @State var isFilePickerPresented = false
+    /// 远端 SFTP 浏览器。
+    @State private var showRemoteBrowser = false
     /// 超出大小限制的文件名列表（用于弹窗提示）。
     @State var oversizedFileAlert: [String]? = nil
 
@@ -79,6 +81,18 @@ struct ChatView: View {
         .onChange(of: viewModel.speechState) {
             viewModel.syncSpeechState()
         }
+        .sheet(isPresented: $showRemoteBrowser) {
+            if let client = viewModel.sshManager.getClient(for: viewModel.serverID) {
+                RemoteFileBrowserView(client: client) { fileName, data in
+                    viewModel.addRemoteAttachment(fileName: fileName, data: data)
+                }
+            } else {
+                ContentUnavailableView(
+                    String(localized: "Disconnected", bundle: LanguageSettings.currentBundle),
+                    systemImage: "wifi.slash"
+                )
+            }
+        }
     }
 
     // MARK: - 带进度动画的重连
@@ -137,6 +151,7 @@ struct ChatView: View {
                     viewModel.sendMessage()
                 },
                     onPickFile: { isFilePickerPresented = true },
+                    onBrowseRemote: { showRemoteBrowser = true },
                     onRemoveAttachment: { viewModel.removeAttachment($0) },
                     presentationState: viewModel.directModePresentation,
                     isConnectingToAgent: viewModel.directSessionCoordinator.isConnectingToAgent,
