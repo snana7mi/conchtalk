@@ -39,9 +39,9 @@ final class DependencyContainer {
     /// 异步工厂方法：将重量级 I/O（ModelContainer、Skill 文件加载）移到后台线程，
     /// 避免阻塞主线程导致首帧卡顿。
     static func create() async -> DependencyContainer {
-        // 提前创建 Application Support 目录，避免 CoreData 首次启动时的冗余错误日志
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        // 提前创建 Application Support 目录，避免 CoreData 首次启动时的冗余错误日志。
+        // 搜索路径为空时跳过，不强制解包。
+        ApplicationSupportDirectory.ensureExists()
 
         // ModelContainer 创建是主要瓶颈（SQLite 打开 + schema 迁移），移到后台线程
         let modelContainer = await Task.detached(priority: .userInitiated) {
