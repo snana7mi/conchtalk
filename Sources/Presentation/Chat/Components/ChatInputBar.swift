@@ -9,6 +9,7 @@ struct ChatInputBar: View {
     let attachments: [FileAttachment]
     let onSend: () -> Void
     let onPickFile: () -> Void
+    var onBrowseRemote: (() -> Void)? = nil
     let onRemoveAttachment: (FileAttachment) -> Void
     var presentationState: DirectModePresentationState = DirectModePresentationState(
         modeState: .inactive,
@@ -102,6 +103,17 @@ struct ChatInputBar: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!isConnected)
+                    .accessibilityLabel(String(localized: "Attach file", bundle: LanguageSettings.currentBundle))
+                    if let onBrowseRemote {
+                        Button(action: onBrowseRemote) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 20))
+                                .foregroundStyle(isConnected ? .secondary : Color.secondary.opacity(0.3))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!isConnected)
+                        .accessibilityLabel(String(localized: "Browse remote files", bundle: LanguageSettings.currentBundle))
+                    }
                 }
 
                 TextField(connectingPlaceholder, text: $text, axis: .vertical)

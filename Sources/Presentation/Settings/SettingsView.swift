@@ -31,6 +31,7 @@ struct SettingsView: View {
     @State private var savedWebSearchSettings: WebSearchSettings
 
     var sshKeyManagementViewModel: SSHKeyManagementViewModel
+    var knownHostsStore: KnownHostsStore
     @Binding private var reportUnsavedChanges: Bool
     @Binding private var triggerSave: Bool
     var healthModel: HealthCheckSettingsModel?
@@ -53,12 +54,14 @@ struct SettingsView: View {
     init(
         selectedLanguage: Binding<AppLanguage>,
         sshKeyManagementViewModel: SSHKeyManagementViewModel,
+        knownHostsStore: KnownHostsStore,
         reportUnsavedChanges: Binding<Bool> = .constant(false),
         triggerSave: Binding<Bool> = .constant(false),
         healthModel: HealthCheckSettingsModel? = nil
     ) {
         _selectedLanguage = selectedLanguage
         self.sshKeyManagementViewModel = sshKeyManagementViewModel
+        self.knownHostsStore = knownHostsStore
         _reportUnsavedChanges = reportUnsavedChanges
         _triggerSave = triggerSave
         self.healthModel = healthModel
@@ -101,6 +104,17 @@ struct SettingsView: View {
                     Label(
                         String(localized: "Manage SSH Keys", bundle: LanguageSettings.currentBundle),
                         systemImage: "key"
+                    )
+                }
+            }
+
+            Section(String(localized: "Host Keys", bundle: LanguageSettings.currentBundle)) {
+                NavigationLink {
+                    KnownHostsManagementView(store: knownHostsStore)
+                } label: {
+                    Label(
+                        String(localized: "Manage Host Keys", bundle: LanguageSettings.currentBundle),
+                        systemImage: "lock.shield"
                     )
                 }
             }

@@ -38,6 +38,23 @@ extension ChatViewModel {
         return oversizedFiles
     }
 
+    /// 把已在内存中的远端文件附加到输入栏。超出大小上限时返回文件名。
+    func addRemoteAttachment(fileName: String, data: Data) -> String? {
+        let fileSize = Int64(data.count)
+        if fileSize > Self.maxFileSize {
+            return fileName
+        }
+        let mimeType = UTType(filenameExtension: (fileName as NSString).pathExtension)?.preferredMIMEType
+            ?? "application/octet-stream"
+        attachments.append(FileAttachment(
+            fileName: fileName,
+            fileSize: fileSize,
+            mimeType: mimeType,
+            data: data
+        ))
+        return nil
+    }
+
     /// 移除指定附件。
     func removeAttachment(_ attachment: FileAttachment) {
         attachments.removeAll { $0.id == attachment.id }

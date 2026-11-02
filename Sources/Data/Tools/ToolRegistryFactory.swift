@@ -9,15 +9,17 @@ nonisolated enum ToolRegistryFactory {
 
     /// 构建应用级基础工具列表。
     static func makeBaseTools(
-        skillRegistry: SkillRegistry,
+        skillRegistry: any SkillLookingUp,
         keychainService: KeychainServiceProtocol,
         subagentSummaries: String = ""
     ) -> [ToolProtocol] {
         [
             ExecuteSSHCommandTool(),
+            PollBackgroundCommandTool(),
             ReadFileTool(),
             WriteFileTool(),
             EditFileTool(),
+            RollbackFileTool(),
             GlobTool(),
             GrepTool(),
             UploadFileTool(),
@@ -33,7 +35,7 @@ nonisolated enum ToolRegistryFactory {
 
     /// 基于基础工具构建应用级注册表。
     static func makeBaseRegistry(
-        skillRegistry: SkillRegistry,
+        skillRegistry: any SkillLookingUp,
         keychainService: KeychainServiceProtocol,
         subagentSummaries: String = ""
     ) -> ToolRegistry {

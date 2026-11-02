@@ -13,6 +13,9 @@ final class DependencyContainer {
     let aiService: UserAIService
     let toolRegistry: ToolRegistry
     let skillRegistry: SkillRegistry
+    /// 用户操作手册及其叠加后的 Skill 查询。工具与模型看到的是这一层，而不是仅包内技能。
+    let runbookCatalog: RunbookCatalog
+    let runbookLaunch: RunbookLaunchService
     let subagentRegistry: SubagentRegistry
     let notificationService: NotificationService
     let memoryService: MemoryService
@@ -28,8 +31,12 @@ final class DependencyContainer {
     let speechRecognitionService: SpeechRecognitionService
     let metricsPoller: ServerMetricsPoller
 
-    /// 授权策略存储（具体类型，供 Trusted Actions UI 读取/撤销规则）。
+    /// 授权策略存储（具体类型，供命令策略页读取/撤销规则）。
     let approvalPolicyStore: ApprovalPolicyStore
+    /// 进程内共享的已知主机存储，连接确认和管理页用同一份。
+    let knownHostsStore: KnownHostsStore
+    /// 握手期间弹出的主机密钥确认。
+    let hostKeyPromptCenter: HostKeyPromptCenter
 
     /// 定时健康检查。后台刷新每次最多跑一台服务器。
     let healthChecks: HealthCheckCoordinator
@@ -42,9 +49,9 @@ final class DependencyContainer {
     /// 异步工厂方法：将重量级 I/O（ModelContainer、Skill 文件加载）移到后台线程，
     /// 避免阻塞主线程导致首帧卡顿。
     static func create() async -> DependencyContainer {
-        // 提前创建 Application Support 目录，避免 CoreData 首次启动时的冗余错误日志
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        // 提前创建 Application Support 目录，避免 CoreData 首次启动时的冗余错误日志。
+        // 搜索路径为空时跳过，不强制解包。
+        ApplicationSupportDirectory.ensureExists()
 
         // ModelContainer 创建是主要瓶颈（SQLite 打开 + schema 迁移），移到后台线程
         let modelContainer = await Task.detached(priority: .userInitiated) {
@@ -100,11 +107,25 @@ final class DependencyContainer {
         self.store = SwiftDataStore(modelContainer: modelContainer)
 
         // Services（纯内存构造，无 I/O）
-        let sshMgr = SSHSessionManager()
+        let knownHostsStore = KnownHostsStore()
+        let hostKeyPromptCenter = HostKeyPromptCenter()
+        self.knownHostsStore = knownHostsStore
+        self.hostKeyPromptCenter = hostKeyPromptCenter
+        let sshMgr = SSHSessionManager(knownHostsStore: knownHostsStore, hostKeyPrompter: hostKeyPromptCenter)
         self.sshManager = sshMgr
 
         // Skill Registry（使用预加载数据，不再读磁盘）
-        self.skillRegistry = SkillRegistry(preloaded: preloadedSkills)
+        let bundleSkills = SkillRegistry(preloaded: preloadedSkills)
+        self.skillRegistry = bundleSkills
+        let runbookStore = FileRunbookStore(directory: RunbookStorage.directory)
+        try? runbookStore.purgeDeleted(olderThan: PersistenceMaintenance.softDeleteRetentionInterval, now: Date())
+        let skillLookup = MutableSkillLookup(
+            base: bundleSkills,
+            extras: RunbookSkills.skills(from: (try? runbookStore.loadAll()) ?? [])
+        )
+        let catalog = RunbookCatalog(store: runbookStore, skills: skillLookup)
+        self.runbookCatalog = catalog
+        self.runbookLaunch = RunbookLaunchService(catalog: catalog, store: store)
 
         // Subagent Registry（使用预加载数据；需在 Tool Registry 之前就绪，供注入 summaries）
         self.subagentRegistry = SubagentRegistry(preloaded: preloadedSubagents)
@@ -113,8 +134,9 @@ final class DependencyContainer {
         self.keychainService = keychainSvc
 
         // Tool Registry：仅注册本地/用户自有服务工具，不注入平台代理工具。
+        // skillLookup 含用户手册，activate_skill 与系统提示都能看到它们。
         self.toolRegistry = ToolRegistryFactory.makeBaseRegistry(
-            skillRegistry: skillRegistry,
+            skillRegistry: skillLookup,
             keychainService: keychainSvc,
             subagentSummaries: subagentRegistry.subagentSummaries
         )
@@ -122,7 +144,7 @@ final class DependencyContainer {
         self.aiService = UserAIService(
             keychainService: keychainService,
             toolRegistry: toolRegistry,
-            skillRegistry: skillRegistry
+            skillRegistry: skillLookup
         )
         self.notificationService = NotificationService()
 
@@ -268,7 +290,7 @@ final class DependencyContainer {
 
     /// makeServerListViewModel：构建服务器列表页面的视图模型实例。
     func makeServerListViewModel() -> ServerListViewModel {
-        ServerListViewModel(store: store, keychainService: keychainService)
+        ServerListViewModel(store: store, keychainService: keychainService, knownHostsStore: knownHostsStore)
     }
 
     /// makeSSHKeyManagementViewModel：构建 SSH 密钥管理页面的视图模型实例。

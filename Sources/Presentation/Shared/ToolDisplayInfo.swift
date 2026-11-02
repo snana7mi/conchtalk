@@ -12,8 +12,10 @@ struct ToolDisplayInfo: Sendable {
     static func info(for toolName: String) -> ToolDisplayInfo {
         switch toolName {
         case "execute_ssh_command":      return ToolDisplayInfo(iconName: "terminal", color: .green)
+        case "poll_background_command":  return ToolDisplayInfo(iconName: "text.alignleft", color: .green)
         case "read_file":                return ToolDisplayInfo(iconName: "doc.text", color: .green)
-        case "write_file":               return ToolDisplayInfo(iconName: "doc.text.fill", color: .orange)
+        case "write_file", "edit_file":  return ToolDisplayInfo(iconName: "doc.text.fill", color: .orange)
+        case "rollback_file":            return ToolDisplayInfo(iconName: "arrow.uturn.backward", color: .orange)
         case "suggest_agent_connection": return ToolDisplayInfo(iconName: "bolt.fill", color: .blue)
         case "update_plan":              return ToolDisplayInfo(iconName: "list.bullet.clipboard", color: .blue)
         case "ask_user":                 return ToolDisplayInfo(iconName: "questionmark.bubble", color: .purple)
@@ -43,7 +45,7 @@ struct ToolDisplayInfo: Sendable {
         case "execute_ssh_command":
             let isDestructive = args?["is_destructive"] as? Bool ?? false
             return isDestructive ? .orange : .green
-        case "write_file":
+        case "write_file", "edit_file", "rollback_file":
             return .orange
         case "suggest_agent_connection":
             return .blue

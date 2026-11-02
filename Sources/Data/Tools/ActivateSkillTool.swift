@@ -33,9 +33,9 @@ nonisolated final class ActivateSkillTool: ToolProtocol, @unchecked Sendable {
         "required": ["skill_name", "explanation"],
     ]
 
-    private let skillRegistry: SkillRegistry
+    private let skillRegistry: any SkillLookingUp
 
-    init(skillRegistry: SkillRegistry) {
+    init(skillRegistry: any SkillLookingUp) {
         self.skillRegistry = skillRegistry
     }
 

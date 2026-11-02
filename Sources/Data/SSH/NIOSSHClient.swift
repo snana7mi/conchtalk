@@ -10,12 +10,13 @@ import os
 /// NIOSSHClient：
 /// `SSHClientProtocol` 的具体实现，负责维护单连接状态、
 /// 处理密码/私钥认证并执行远端命令流读取。
-/// 支持主机密钥 TOFU 验证、连接保活、命令超时与流式输出。
+/// 支持主机密钥指纹确认、连接保活、命令超时与流式输出。
 actor NIOSSHClient: SSHClientProtocol {
     private var client: SSHClient?
     private var _isConnected = false
     private var keepAliveTask: Task<Void, Never>?
     private let knownHostsStore: KnownHostsStore
+    private let hostKeyPrompter: (any HostKeyPrompting)?
     private var _capabilities: ServerCapabilities = .unknown
 
     /// 断线回调：keepalive 检测到连接丢失时触发，通知上层（SSHSessionManager）立即更新 UI 状态。
@@ -53,9 +54,12 @@ actor NIOSSHClient: SSHClientProtocol {
     // MARK: - Initialization
 
     /// 初始化 SSH 客户端。
-    /// - Parameter knownHostsStore: 已知主机密钥存储；传 `nil` 使用默认实例。
-    init(knownHostsStore: KnownHostsStore? = nil) {
+    /// - Parameters:
+    ///   - knownHostsStore: 已知主机密钥存储；传 `nil` 使用默认实例。
+    ///   - hostKeyPrompter: 首次连接和密钥变化时的确认器。传 `nil` 则拒绝未知或变化的密钥，不会静默信任。
+    init(knownHostsStore: KnownHostsStore? = nil, hostKeyPrompter: (any HostKeyPrompting)? = nil) {
         self.knownHostsStore = knownHostsStore ?? KnownHostsStore()
+        self.hostKeyPrompter = hostKeyPrompter
     }
 
     // MARK: - Connect
@@ -91,8 +95,12 @@ actor NIOSSHClient: SSHClientProtocol {
             authMethod = try Self.parsePrivateKey(keyString: keyString, username: server.username, passphrase: keyPassphrase)
         }
 
-        // 构建基于 KnownHostsStore 的主机密钥校验器（TOFU）
-        let hostKeyValidator = await knownHostsStore.makeValidator(host: server.host, port: server.port)
+        // 首次连接展示指纹并等待确认；没有确认器时失败关闭，不自动信任。
+        let hostKeyValidator = await knownHostsStore.makeValidator(
+            host: server.host,
+            port: server.port,
+            prompter: hostKeyPrompter
+        )
 
         do {
             let sshClient = try await SSHClient.connect(
@@ -184,16 +192,33 @@ actor NIOSSHClient: SSHClientProtocol {
     /// 在远端执行命令并返回聚合输出。
     /// - Parameters:
     ///   - command: 待执行命令。
-    ///   - timeout: 超时时间（秒），默认 30 秒。
+    ///   - timeout: 超时时间（秒）。调用方决定具体值；工具层默认 30 秒并夹到 600 秒。
+    ///   - reclaimOnTimeout: 为 true 时用 setsid 包装命令，超时后只杀掉该进程组，不拆连接。
     /// - Returns: 标准输出与标准错误按规则合并后的文本。
     /// - Throws:
     ///   - 未连接时抛出 `SSHError.notConnected`。
     ///   - 超时时抛出 `SSHError.timeout`。
     ///   - 命令失败或连接异常时抛出 `SSHError.commandFailed`。
-    /// - Side Effects: 发生连接级错误时会主动重置本地连接状态。
-    func execute(command: String, timeout: TimeInterval = 30) async throws -> String {
+    /// - Side Effects: 仅当通道在超时后仍不返回时，才会强制断开整条连接。
+    func execute(command: String, timeout: TimeInterval, reclaimOnTimeout: Bool) async throws -> String {
         guard _isConnected, let client else {
             throw SSHError.notConnected
+        }
+
+        let commandToRun: String
+        let swiftTimeout: TimeInterval
+        if reclaimOnTimeout {
+            let token = UUID().uuidString
+            commandToRun = RemoteCommandSupervisor.wrap(
+                command: command,
+                pidFile: RemoteCommandSupervisor.pidFilePath(token: token),
+                timeout: timeout
+            )
+            // 远端脚本先到时杀进程组；Swift 侧多等一个宽限期，正常超时不会拆连接。
+            swiftTimeout = timeout + Self.hangGraceSeconds
+        } else {
+            commandToRun = command
+            swiftTimeout = timeout
         }
 
         // 同步完成标志：执行子任务退出时置位（OSAllocatedUnfairLock 满足 Sendable，无 await 开销）
@@ -203,15 +228,19 @@ actor NIOSSHClient: SSHClientProtocol {
             // 任务 1：实际命令执行
             group.addTask {
                 defer { finished.withLock { $0 = true } }
-                return try await Self.executeOnClient(client, command: command)
+                return try await Self.executeOnClient(
+                    client,
+                    command: commandToRun,
+                    timeoutExitCode: reclaimOnTimeout ? RemoteCommandSupervisor.timeoutExitCode : nil
+                )
             }
 
             // 任务 2：超时守卫 + 宽限 watchdog
             group.addTask { [weak self] in
-                try await Task.sleep(for: .seconds(timeout))
+                try await Task.sleep(for: .seconds(swiftTimeout))
                 // 宽限 watchdog：取消信号发出后，执行子任务若仍未在宽限期内退出，
-                // 说明其挂在不可取消的 NIO future 上（半开连接）——强制关闭整条连接，
-                // fail 所有挂起 future，解除 task group 的隐式等待。
+                // 说明其挂在不可取消的 NIO future 上（半开连接）——这时才强制关闭整条连接。
+                // reclaimOnTimeout 的正常路径由远端包装脚本杀掉进程组，通道自行结束，不会进这里。
                 Task.detached {
                     try? await Task.sleep(for: .seconds(Self.hangGraceSeconds))
                     if !finished.withLock({ $0 }) {
@@ -243,12 +272,17 @@ actor NIOSSHClient: SSHClientProtocol {
     }
 
     /// 在指定 SSHClient 上执行命令（纯函数，不依赖 actor 状态）。
-    nonisolated private static func executeOnClient(_ client: SSHClient, command: String) async throws -> String {
-        do {
-            let stream = try await client.executeCommandStream(command)
-            var stdout = ByteBuffer()
-            var stderr = ByteBuffer()
+    /// `timeoutExitCode` 非空时，若该退出码和监督标记同时出现，则视为超时而不是命令失败。
+    nonisolated private static func executeOnClient(
+        _ client: SSHClient,
+        command: String,
+        timeoutExitCode: Int? = nil
+    ) async throws -> String {
+        let stream = try await client.executeCommandStream(command)
+        var stdout = ByteBuffer()
+        var stderr = ByteBuffer()
 
+        do {
             for try await chunk in stream {
                 try Task.checkCancellation()  // 对齐 executeStreaming：超时取消后立即退出，不再消费到流自然结束
                 switch chunk {
@@ -258,30 +292,38 @@ actor NIOSSHClient: SSHClientProtocol {
                     stderr.writeBuffer(&buffer)
                 }
             }
-
-            let stdoutStr = String(data: Data(buffer: stdout), encoding: .utf8) ?? ""
-            let stderrStr = String(data: Data(buffer: stderr), encoding: .utf8) ?? ""
-
-            if !stderrStr.isEmpty {
-                print("[SSH stderr] \(command): \(stderrStr)")
-            }
-
-            // Merge stdout and stderr — stderr is informational, not a fatal error
-            if stdoutStr.isEmpty && !stderrStr.isEmpty {
-                return stderrStr
-            } else if !stderrStr.isEmpty {
-                return stdoutStr + "\n[stderr]\n" + stderrStr
-            }
-            return stdoutStr
         } catch is TTYSTDError {
             // TTYSTDError means stderr had content — not a connection failure
             print("[SSH] TTYSTDError for command: \(command)")
             throw SSHError.commandFailed("Command produced error output")
         } catch let error as SSHClient.CommandFailed {
+            let stdoutStr = String(data: Data(buffer: stdout), encoding: .utf8) ?? ""
+            let stderrStr = String(data: Data(buffer: stderr), encoding: .utf8) ?? ""
+            if let timeoutExitCode,
+               RemoteCommandSupervisor.isTimeoutResult(exitCode: error.exitCode, stdout: stdoutStr, stderr: stderrStr),
+               error.exitCode == timeoutExitCode {
+                print("[SSH] Command timed out; remote process group signaled, connection kept")
+                throw SSHError.timeout
+            }
             // Non-zero exit code — command failed but connection is fine
             print("[SSH] Command failed (exit \(error.exitCode)): \(command)")
             throw SSHError.commandFailed("Exit code: \(error.exitCode)")
         }
+
+        let stdoutStr = String(data: Data(buffer: stdout), encoding: .utf8) ?? ""
+        let stderrStr = String(data: Data(buffer: stderr), encoding: .utf8) ?? ""
+
+        if !stderrStr.isEmpty {
+            print("[SSH stderr] \(command): \(stderrStr)")
+        }
+
+        // Merge stdout and stderr — stderr is informational, not a fatal error
+        if stdoutStr.isEmpty && !stderrStr.isEmpty {
+            return stderrStr
+        } else if !stderrStr.isEmpty {
+            return stdoutStr + "\n[stderr]\n" + stderrStr
+        }
+        return stdoutStr
     }
 
     // MARK: - Streaming Execute
@@ -377,18 +419,29 @@ actor NIOSSHClient: SSHClientProtocol {
         }
     }
 
-    /// 通过 SFTP 将数据写入远端文件。
+    /// 通过 SFTP 将数据写入远端文件。先写同目录临时文件，保留原模式与属主后再原子替换。
     func sftpWriteFile(path: String, data: Data) async throws {
-        guard _isConnected, let client else {
-            throw SSHError.notConnected
-        }
-
-        try await client.withSFTP { sftp in
+        try await writeAtomically(path: path) { sftp, temporaryPath in
             try await sftp.withFile(
-                filePath: path,
+                filePath: temporaryPath,
                 flags: [.write, .create, .truncate]
             ) { file in
                 try await file.write(ByteBuffer(data: data))
+            }
+        }
+    }
+
+    /// 只读取文件前缀，避免为了判断二进制而把整个文件拉进内存。
+    func sftpReadPrefix(path: String, maxBytes: Int) async throws -> Data {
+        guard _isConnected, let client else {
+            throw SSHError.notConnected
+        }
+        if maxBytes <= 0 { return Data() }
+        let length = UInt32(min(maxBytes, Int(UInt32.max)))
+        return try await client.withSFTP { sftp in
+            try await sftp.withFile(filePath: path, flags: .read) { file in
+                let buffer = try await file.read(from: 0, length: length)
+                return Data(buffer: buffer)
             }
         }
     }
@@ -408,6 +461,26 @@ actor NIOSSHClient: SSHClientProtocol {
         }
     }
 
+    /// 通过 SFTP 列出目录，目录项按文件夹在前、名称排序。
+    func sftpListDirectory(path: String) async throws -> [RemoteFileEntry] {
+        guard _isConnected, let client else {
+            throw SSHError.notConnected
+        }
+        let directory = RemotePath.normalize(path)
+        return try await client.withSFTP { sftp in
+            let names = try await sftp.listDirectory(atPath: directory)
+            let items = names.flatMap(\.components).map { component in
+                RemoteDirectoryIndex.Item(
+                    name: component.filename,
+                    longname: component.longname,
+                    permissions: component.attributes.permissions,
+                    size: component.attributes.size
+                )
+            }
+            return RemoteDirectoryIndex.entries(directory: directory, items: items)
+        }
+    }
+
     /// 分块 SFTP 写入，每写完一块调用 onProgress 回调。
     func sftpWriteFileChunked(
         path: String,
@@ -415,15 +488,11 @@ actor NIOSSHClient: SSHClientProtocol {
         chunkSize: Int = 256 * 1024,
         onProgress: @escaping @Sendable (Int64, Int64) async -> Void
     ) async throws {
-        guard _isConnected, let client else {
-            throw SSHError.notConnected
-        }
-
         let totalSize = Int64(data.count)
 
-        try await client.withSFTP { sftp in
+        try await writeAtomically(path: path) { sftp, temporaryPath in
             try await sftp.withFile(
-                filePath: path,
+                filePath: temporaryPath,
                 flags: [.write, .create, .truncate]
             ) { file in
                 var offset = 0
@@ -435,6 +504,60 @@ actor NIOSSHClient: SSHClientProtocol {
                     await onProgress(Int64(offset), totalSize)
                 }
             }
+        }
+    }
+
+    /// 同目录写入临时文件，把原文件的权限和属主抄到临时文件上，再 `mv -f` 替换。
+    /// 替换失败时删除临时文件。硬链接不会保留（inode 换成了临时文件）。
+    private func writeAtomically(
+        path: String,
+        body: @Sendable (SFTPClient, String) async throws -> Void
+    ) async throws {
+        guard _isConnected, let client else {
+            throw SSHError.notConnected
+        }
+        let temporaryPath = AtomicRemoteWrite.temporaryPath(for: path)
+        do {
+            try await client.withSFTP { sftp in
+                let original = try? await sftp.getAttributes(at: path)
+                try await body(sftp, temporaryPath)
+                await Self.applyPreservedAttributes(on: sftp, at: temporaryPath, from: original)
+            }
+            _ = try await execute(
+                command: AtomicRemoteWrite.replaceCommand(temporaryPath: temporaryPath, destination: path),
+                timeout: 30,
+                reclaimOnTimeout: true
+            )
+        } catch {
+            await removeTemporaryFile(temporaryPath)
+            throw error
+        }
+    }
+
+    /// 尽力保留原文件的权限和属主。chown 失败时仍尝试 chmod，都不让写入失败。
+    private static func applyPreservedAttributes(
+        on sftp: SFTPClient,
+        at path: String,
+        from original: SFTPFileAttributes?
+    ) async {
+        guard let original else { return }
+        if let permissions = original.permissions {
+            var attributes = SFTPFileAttributes()
+            attributes.permissions = permissions
+            try? await sftp.setAttributes(at: path, to: attributes)
+        }
+        if let uidgid = original.uidgid {
+            var attributes = SFTPFileAttributes()
+            attributes.uidgid = uidgid
+            try? await sftp.setAttributes(at: path, to: attributes)
+        }
+    }
+
+    /// 删除原子写入留下的临时文件。
+    private func removeTemporaryFile(_ path: String) async {
+        guard let client else { return }
+        try? await client.withSFTP { sftp in
+            try? await sftp.remove(at: path)
         }
     }
 
@@ -541,6 +664,10 @@ enum SSHError: LocalizedError, Equatable {
     case commandFailed(String)
     case timeout
     case hostKeyMismatch(host: String, stored: String, received: String)
+    /// 用户拒绝了这枚主机密钥。`stored == nil` 表示首次连接。
+    case hostKeyRejected(host: String, stored: String?, received: String)
+    /// 没有确认器，未知主机密钥不会被写入。
+    case hostKeyConfirmationRequired(host: String, fingerprint: String)
 
     /// 适用于 UI 展示的本地化错误文案。
     var errorDescription: String? {
@@ -551,7 +678,26 @@ enum SSHError: LocalizedError, Equatable {
         case .commandFailed(let msg): return String(localized: "Command failed: \(msg)")
         case .timeout: return String(localized: "Connection timed out. Please check your network and server address.")
         case .hostKeyMismatch(let host, let stored, let received):
-            return String(localized: "Host key mismatch for \(host). Expected fingerprint \(stored), but received \(received). This may indicate a man-in-the-middle attack.")
+            return String(
+                localized: "Host key mismatch for \(host). Expected fingerprint \(HostKeyFingerprint.openSSH(hex: stored)), but received \(HostKeyFingerprint.openSSH(hex: received)). This may indicate a man-in-the-middle attack.",
+                bundle: LanguageSettings.currentBundle
+            )
+        case .hostKeyRejected(let host, let stored, let received):
+            if let stored {
+                return String(
+                    localized: "You did not trust the new host key for \(host). Stored fingerprint \(HostKeyFingerprint.openSSH(hex: stored)), received \(HostKeyFingerprint.openSSH(hex: received)).",
+                    bundle: LanguageSettings.currentBundle
+                )
+            }
+            return String(
+                localized: "You did not trust the host key for \(host). Fingerprint: \(HostKeyFingerprint.openSSH(hex: received)).",
+                bundle: LanguageSettings.currentBundle
+            )
+        case .hostKeyConfirmationRequired(let host, let fingerprint):
+            return String(
+                localized: "The host key for \(host) needs confirmation before it can be trusted. Fingerprint: \(HostKeyFingerprint.openSSH(hex: fingerprint)).",
+                bundle: LanguageSettings.currentBundle
+            )
         }
     }
 }

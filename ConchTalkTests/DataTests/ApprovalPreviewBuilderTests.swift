@@ -60,6 +60,38 @@ struct ApprovalPreviewBuilderTests {
         if case .unavailable = p {} else { Issue.record("应为 unavailable") }
     }
 
+    @Test("rollback_file 把当前内容 diff 成快照")
+    func rollbackDiff() async throws {
+        let journal = RemoteFileChangeJournal()
+        let path = "/tmp/demo.txt"
+        await journal.push(
+            RemoteFileChangeJournal.Snapshot(
+                id: "s1",
+                path: path,
+                snapshotPath: "/tmp/conchtalk-undo/snap",
+                existed: true,
+                byteCount: 3,
+                restorable: true
+            ),
+            serverID: nil
+        )
+        let ssh = MockSSHClient()
+        ssh.sftpFileSizeResult = 3
+        ssh.sftpReadResults = [Data("new".utf8), Data("old".utf8)]
+
+        let preview = await ApprovalPreviewBuilder(journal: journal).buildPreview(
+            toolName: "rollback_file",
+            arguments: ["path": path],
+            sshClient: ssh
+        )
+        if case .fileDiff(let lines, _) = preview {
+            #expect(lines.contains(.removed("new")))
+            #expect(lines.contains(.added("old")))
+        } else {
+            Issue.record("应为 fileDiff")
+        }
+    }
+
     @Test("execute_ssh_command → command")
     func command() async throws {
         let p = await ApprovalPreviewBuilder().buildPreview(toolName: "execute_ssh_command",

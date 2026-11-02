@@ -6,11 +6,15 @@ struct ChatView: View {
     @State var viewModel: ChatViewModel
     /// 断开连接后的回调（清除 ViewModel 缓存等）。
     var onDisconnect: ((UUID) -> Void)?
+    /// 用户操作手册。未注入时不显示保存与列表入口。
+    var runbookCatalog: RunbookCatalog?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
     /// 文件选择器显示状态。
     @State var isFilePickerPresented = false
+    /// 远端 SFTP 浏览器。
+    @State private var showRemoteBrowser = false
     /// 超出大小限制的文件名列表（用于弹窗提示）。
     @State var oversizedFileAlert: [String]? = nil
 
@@ -22,6 +26,9 @@ struct ChatView: View {
 
     /// 是否显示服务器信息页。
     @State private var showServerInfo = false
+    @State private var showRunbooks = false
+    @State private var showSaveRunbook = false
+    @State private var runbookModel: RunbookListModel?
 
     var body: some View {
         applyPresentations(to: chatContent)
@@ -57,6 +64,9 @@ struct ChatView: View {
             }
 
             healthCheckActive = true
+            if runbookModel == nil, let runbookCatalog {
+                runbookModel = RunbookListModel(catalog: runbookCatalog)
+            }
         }
         .onDisappear {
             healthCheckActive = false
@@ -78,6 +88,40 @@ struct ChatView: View {
         }
         .onChange(of: viewModel.speechState) {
             viewModel.syncSpeechState()
+        }
+        .sheet(isPresented: $showRemoteBrowser) {
+            if let client = viewModel.sshManager.getClient(for: viewModel.serverID) {
+                RemoteFileBrowserView(client: client) { fileName, data in
+                    viewModel.addRemoteAttachment(fileName: fileName, data: data)
+                }
+            } else {
+                ContentUnavailableView(
+                    String(localized: "Disconnected", bundle: LanguageSettings.currentBundle),
+                    systemImage: "wifi.slash"
+                )
+            }
+        }
+        .sheet(isPresented: $showRunbooks) {
+            if let runbookModel {
+                RunbookListView(
+                    model: runbookModel,
+                    currentServer: viewModel.server,
+                    servers: [],
+                    onRun: { _, prompt in
+                        viewModel.inputText = prompt
+                        viewModel.sendMessage()
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showSaveRunbook) {
+            if let runbookModel {
+                SaveRunbookSheet(
+                    model: runbookModel,
+                    messages: viewModel.messages,
+                    sourceServerID: viewModel.serverID
+                )
+            }
         }
     }
 
@@ -137,6 +181,7 @@ struct ChatView: View {
                     viewModel.sendMessage()
                 },
                     onPickFile: { isFilePickerPresented = true },
+                    onBrowseRemote: { showRemoteBrowser = true },
                     onRemoveAttachment: { viewModel.removeAttachment($0) },
                     presentationState: viewModel.directModePresentation,
                     isConnectingToAgent: viewModel.directSessionCoordinator.isConnectingToAgent,
@@ -184,6 +229,27 @@ struct ChatView: View {
             .buttonStyle(.plain)
 
             Spacer()
+
+            if runbookCatalog != nil {
+                Menu {
+                    Button {
+                        prepareRunbookModel()
+                        showSaveRunbook = true
+                    } label: {
+                        Label(String(localized: "Save as Runbook", bundle: LanguageSettings.currentBundle), systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        prepareRunbookModel()
+                        showRunbooks = true
+                    } label: {
+                        Label(String(localized: "Runbooks", bundle: LanguageSettings.currentBundle), systemImage: "text.book.closed")
+                    }
+                } label: {
+                    Image(systemName: "text.book.closed")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel(String(localized: "Runbooks", bundle: LanguageSettings.currentBundle))
+            }
 
             // 右侧按钮
             if viewModel.directModePresentation.isActive {
@@ -243,5 +309,11 @@ struct ChatView: View {
 
     private var isReconnecting: Bool {
         viewModel.isReconnecting
+    }
+
+    private func prepareRunbookModel() {
+        if runbookModel == nil, let runbookCatalog {
+            runbookModel = RunbookListModel(catalog: runbookCatalog)
+        }
     }
 }

@@ -50,7 +50,7 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
         parentConfirm: @escaping @Sendable (ConfirmationRequest) async -> CommandApproval,
         approvalPolicyStore: ApprovalPolicyProviding = NoOpApprovalPolicy(),
         approvalPreviewBuilder: ApprovalPreviewProviding = ApprovalPreviewBuilder(),
-        maxConcurrent: Int = 2,
+        maxConcurrent: Int = BoundedParallelMap.defaultMaxConcurrent,
         subMaxIterations: Int = 12
     ) {
         self.aiService = aiService
@@ -69,34 +69,11 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
     }
 
     /// 并发执行任务并按输入顺序回填结果。
-    /// - 限流策略：先投放 `min(maxConcurrent, tasks.count)` 个任务，每完成一个再补投一个，
-    ///   使任意时刻在跑任务数不超过 `maxConcurrent`。
-    /// - 顺序保证：用下标把结果写回固定位置，最后 compactMap，与输入顺序一一对应。
+    /// 限流、取消后不再补投、失败隔离都交给 `BoundedParallelMap`，与跨服务器批处理共用同一策略。
     func run(tasks: [SubagentTask]) async -> [SubagentResult] {
-        guard !tasks.isEmpty else { return [] }
-        var results = [SubagentResult?](repeating: nil, count: tasks.count)
-
-        await withTaskGroup(of: (Int, SubagentResult).self) { group in
-            var next = 0
-            let limit = min(maxConcurrent, tasks.count)
-            for _ in 0..<limit {
-                let i = next
-                next += 1
-                let task = tasks[i]
-                // 取消后不再启动新子 agent；返回值表示是否成功加入，正常路径恒为 true，逻辑等价。
-                _ = group.addTaskUnlessCancelled { (i, await self.runOne(task)) }
-            }
-            while let (idx, res) = await group.next() {
-                results[idx] = res
-                if next < tasks.count {
-                    let i = next
-                    next += 1
-                    let task = tasks[i]
-                    _ = group.addTaskUnlessCancelled { (i, await self.runOne(task)) }
-                }
-            }
+        await BoundedParallelMap.map(tasks, maxConcurrent: maxConcurrent) { task in
+            await self.runOne(task)
         }
-        return results.compactMap { $0 }
     }
 
     /// 执行单个任务：查角色 → 建受限工具表 → 跑子 UseCase → 取最终结论。
