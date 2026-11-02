@@ -4,7 +4,7 @@ import Foundation
 /// SkillLookingUp：
 /// 按名称查找 Skill、生成系统提示摘要，并按需读取辅助文件。
 /// 内置 `SkillRegistry` 与可更新的用户手册层都实现该契约。
-protocol SkillLookingUp: Sendable {
+nonisolated protocol SkillLookingUp: Sendable {
     /// 按名称查找 Skill。内置技能优先于同名用户手册。
     func skill(named name: String) -> Skill?
 

@@ -11,7 +11,7 @@ nonisolated enum RunbookStorage {
 }
 
 /// RunbookStoring：手册的读取、保存与软删除。
-protocol RunbookStoring: Sendable {
+nonisolated protocol RunbookStoring: Sendable {
     func loadAll() throws -> [Runbook]
     func save(_ runbook: Runbook) throws
     func softDelete(id: UUID, now: Date) throws
