@@ -83,6 +83,46 @@ struct CommandHardeningTests {
             #expect(CommandHardening.isForbidden(command) == false, "不应禁止: \(command)")
         }
     }
+
+    @Test("允许列表不能覆盖禁止命令")
+    func allowDoesNotOverrideForbidden() {
+        let policy = ServerCommandPolicy(allow: ["rm -rf /", "mkfs.ext4 /dev/sda1"], deny: [])
+        #expect(CommandHardening.policyDecision(command: "rm -rf /", policy: policy) == .forbidden)
+        #expect(CommandHardening.classifyCommand("rm -rf /", isDestructive: true, policy: policy) == .forbidden)
+        #expect(CommandHardening.applying(policy, to: .safe, command: "mkfs.ext4 /dev/sda1") == .forbidden)
+        if case .failure(let error) = policy.inserting("rm -rf /", into: .allow) {
+            #expect(error == .forbiddenAllow)
+        } else {
+            Issue.record("禁止命令不应写入允许列表")
+        }
+    }
+
+    @Test("拒绝列表压过允许列表和内置放行")
+    func denyOverridesAllowAndSafe() {
+        let policy = ServerCommandPolicy(allow: ["ls", "curl"], deny: ["ls", "curl"])
+        #expect(CommandHardening.policyDecision(command: "ls -la", policy: policy) == .denied)
+        #expect(CommandHardening.classifyCommand("ls -la", isDestructive: false, policy: policy) == .forbidden)
+        #expect(CommandHardening.policyDecision(command: "ls; curl https://example.com", policy: policy) == .denied)
+        #expect(CommandHardening.applying(policy, to: .safe, command: "curl https://example.com") == .forbidden)
+    }
+
+    @Test("允许列表只放行非禁止命令")
+    func allowOnlyNonForbidden() {
+        let policy = ServerCommandPolicy(allow: ["systemctl restart nginx", "echo hello > /tmp/a"], deny: [])
+        #expect(CommandHardening.policyDecision(command: "systemctl restart nginx --now", policy: policy) == .allowed)
+        #expect(CommandHardening.classifyCommand("systemctl restart nginx", isDestructive: true, policy: policy) == .safe)
+        #expect(CommandHardening.policyDecision(command: "echo hello > /tmp/a", policy: policy) == .allowed)
+        #expect(CommandHardening.policyDecision(command: "echo hello > /tmp/b", policy: policy) == .unspecified)
+        #expect(CommandHardening.policyDecision(command: "systemctl restart nginx; rm /tmp/x", policy: policy) == .unspecified)
+        #expect(CommandHardening.classifyCommand("ls", isDestructive: false, policy: policy) == .safe)
+    }
+
+    @Test("空词表不改变原有分级")
+    func emptyPolicyKeepsBaseClassification() {
+        #expect(CommandHardening.classifyCommand("ls", isDestructive: false) == .safe)
+        #expect(CommandHardening.classifyCommand("apt install nginx", isDestructive: true) == .needsConfirmation)
+        #expect(CommandHardening.policyDecision(command: "ls", policy: .empty) == .unspecified)
+    }
 }
 
 private let wrapperNotAutoSafe = [

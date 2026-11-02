@@ -150,13 +150,83 @@ nonisolated enum CommandHardening {
     }
 
     /// `execute_ssh_command` 的安全级别。`isDestructive == true` 只能把只读命令升到需要确认。
-    static func classifyCommand(_ command: String, isDestructive: Bool) -> SafetyLevel {
+    /// `policy` 在内置分级之后叠加：拒绝列表压过允许列表、内置放行和「始终允许」；
+    /// 允许列表只能把非禁止命令降为 `.safe`，不能放过 `isForbidden`。
+    static func classifyCommand(
+        _ command: String,
+        isDestructive: Bool,
+        policy: ServerCommandPolicy = .empty
+    ) -> SafetyLevel {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        if isForbidden(trimmed) { return .forbidden }
-        if isAutoSafe(trimmed), !hasInjectionOrRedirection(trimmed), !isDestructive {
-            return .safe
+        let base: SafetyLevel
+        if isForbidden(trimmed) {
+            base = .forbidden
+        } else if isAutoSafe(trimmed), !hasInjectionOrRedirection(trimmed), !isDestructive {
+            base = .safe
+        } else {
+            base = .needsConfirmation
         }
-        return .needsConfirmation
+        return applying(policy, to: base, command: trimmed)
+    }
+
+    /// 用户词表对一条命令的结论。禁止模式优先于拒绝列表，拒绝列表优先于允许列表。
+    static func policyDecision(command: String, policy: ServerCommandPolicy) -> CommandPolicyDecision {
+        let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return .unspecified }
+        if isForbidden(command) { return .forbidden }
+        if policy.deny.contains(where: { matchesDenyEntry($0, command: command) }) {
+            return .denied
+        }
+        if policy.allow.contains(where: { matchesAllowEntry($0, command: command) }) {
+            return .allowed
+        }
+        return .unspecified
+    }
+
+    /// 把用户词表叠到工具原始分级上。拒绝与内置禁止都变成 `.forbidden`；
+    /// 允许只提升非禁止命令。没有命中时保持原分级。
+    static func applying(_ policy: ServerCommandPolicy, to raw: SafetyLevel, command: String) -> SafetyLevel {
+        switch policyDecision(command: command, policy: policy) {
+        case .forbidden, .denied:
+            return .forbidden
+        case .allowed:
+            return raw == .forbidden ? .forbidden : .safe
+        case .unspecified:
+            return raw
+        }
+    }
+
+    /// 拒绝条目：整句相等，或任一 shell 段的前导 token 与条目一致（含注入和多段）。
+    static func matchesDenyEntry(_ entry: String, command: String) -> Bool {
+        let entry = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entry.isEmpty, !command.isEmpty else { return false }
+        if entry == command { return true }
+        let entryTokens = tokenize(entry)
+        guard !entryTokens.isEmpty else { return false }
+        for segment in splitRawSegments(command) {
+            let tokens = tokenize(segment)
+            if tokens.count >= entryTokens.count, Array(tokens.prefix(entryTokens.count)) == entryTokens {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// 允许条目：禁止命令永远不匹配。精确整句可以带重定向；
+    /// 前缀匹配只接受单段、且没有注入/重定向的命令。
+    static func matchesAllowEntry(_ entry: String, command: String) -> Bool {
+        let entry = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entry.isEmpty, !command.isEmpty, !isForbidden(command) else { return false }
+        if entry == command { return true }
+        if hasInjectionOrRedirection(command) { return false }
+        let segments = splitRawSegments(command)
+        guard segments.count == 1 else { return false }
+        let entryTokens = tokenize(entry)
+        let tokens = tokenize(segments[0])
+        guard !entryTokens.isEmpty, tokens.count >= entryTokens.count else { return false }
+        return Array(tokens.prefix(entryTokens.count)) == entryTokens
     }
 
     // MARK: - 自动放行

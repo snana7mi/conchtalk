@@ -46,8 +46,15 @@ nonisolated enum ToolSafetyGate {
         onAgentEvents: @MainActor @escaping @Sendable ([AgentStreamEvent]) -> Void
     ) async -> ToolGateResult {
         let rawSafety = tool.validateSafety(arguments: arguments)
-        let effectiveSafety = permissionLevel.effectiveSafetyLevel(rawSafety)
-        // 写操作属性来自工具原始分级，不应被 strict/permissive 的审批映射改变。
+        let policyAdjusted = await Self.adjustForCommandPolicy(
+            rawSafety,
+            toolName: tool.name,
+            arguments: arguments,
+            serverID: serverID,
+            policyStore: policyStore
+        )
+        let effectiveSafety = permissionLevel.effectiveSafetyLevel(policyAdjusted)
+        // 写操作属性来自工具原始分级，不应被 strict/permissive 或允许列表的审批映射改变。
         let hadWrite = rawSafety == .needsConfirmation
 
         switch effectiveSafety {
@@ -110,5 +117,22 @@ nonisolated enum ToolSafetyGate {
         case .forbidden:
             return .forbidden
         }
+    }
+
+    /// 只对 `execute_ssh_command` 叠加服务器词表。拒绝与内置禁止优先；允许列表不能放行禁止命令。
+    private static func adjustForCommandPolicy(
+        _ raw: SafetyLevel,
+        toolName: String,
+        arguments: [String: Any],
+        serverID: UUID?,
+        policyStore: ApprovalPolicyProviding
+    ) async -> SafetyLevel {
+        guard toolName == "execute_ssh_command",
+              let serverID,
+              let command = arguments["command"] as? String else {
+            return raw
+        }
+        let policy = await policyStore.commandPolicy(for: serverID)
+        return CommandHardening.applying(policy, to: raw, command: command)
     }
 }

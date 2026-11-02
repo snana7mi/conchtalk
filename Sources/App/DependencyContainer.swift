@@ -28,8 +28,12 @@ final class DependencyContainer {
     let speechRecognitionService: SpeechRecognitionService
     let metricsPoller: ServerMetricsPoller
 
-    /// 授权策略存储（具体类型，供 Trusted Actions UI 读取/撤销规则）。
+    /// 授权策略存储（具体类型，供命令策略页读取/撤销规则）。
     let approvalPolicyStore: ApprovalPolicyStore
+    /// 进程内共享的已知主机存储，连接确认和管理页用同一份。
+    let knownHostsStore: KnownHostsStore
+    /// 握手期间弹出的主机密钥确认。
+    let hostKeyPromptCenter: HostKeyPromptCenter
 
     // MARK: - 新架构协调器
 
@@ -97,7 +101,11 @@ final class DependencyContainer {
         self.store = SwiftDataStore(modelContainer: modelContainer)
 
         // Services（纯内存构造，无 I/O）
-        let sshMgr = SSHSessionManager()
+        let knownHostsStore = KnownHostsStore()
+        let hostKeyPromptCenter = HostKeyPromptCenter()
+        self.knownHostsStore = knownHostsStore
+        self.hostKeyPromptCenter = hostKeyPromptCenter
+        let sshMgr = SSHSessionManager(knownHostsStore: knownHostsStore, hostKeyPrompter: hostKeyPromptCenter)
         self.sshManager = sshMgr
 
         // Skill Registry（使用预加载数据，不再读磁盘）
@@ -229,7 +237,7 @@ final class DependencyContainer {
 
     /// makeServerListViewModel：构建服务器列表页面的视图模型实例。
     func makeServerListViewModel() -> ServerListViewModel {
-        ServerListViewModel(store: store, keychainService: keychainService)
+        ServerListViewModel(store: store, keychainService: keychainService, knownHostsStore: knownHostsStore)
     }
 
     /// makeSSHKeyManagementViewModel：构建 SSH 密钥管理页面的视图模型实例。

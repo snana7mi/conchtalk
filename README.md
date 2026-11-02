@@ -61,6 +61,7 @@ None of these flows passes through a ConchTalk account, gateway, relay, or cloud
 ## What ConchTalk Can Do
 
 - Connect to servers using password or SSH key authentication
+- Confirm a server's SHA256 host key on first connection, compare old and new fingerprints when the key changes, and review or delete known host keys in Settings
 - Execute AI-planned multi-step tasks with tool calls
 - Dispatch parallel subagents for specialized, context-isolated subtasks
 - Read, write, edit, search, and upload files on remote systems
@@ -74,6 +75,7 @@ None of these flows passes through a ConchTalk account, gateway, relay, or cloud
 - Read `~/AGENTS.md` and the `name`/`description` of `~/.agents/skills/*/SKILL.md` on the server (read-only, once per connection) and include them as server reference context
 - Manage long conversations automatically: large tool outputs keep their head and tail, older tool results are cleared in batches (stable for prompt caching), and the context budget is capped to the model's context window minus the reply budget
 - Run consecutive read-only tool calls from one model response in parallel (up to 4), while writes, approvals, and special tools stay serial and in order
+- Set a per-server command allow list and deny list, and revoke saved always-allow rules from the same screen
 
 ### AI settings
 
@@ -135,7 +137,9 @@ Permission modes:
 
 Hardening rules applied on top of safety levels:
 
-- `execute_ssh_command`: a command auto-runs only when every segment is still a read-only allowlisted form. Wrappers (`env` with a child command, `sudo`, `nohup`, `xargs`, `timeout`, `nice`, `time`, `command`, `exec`, `sh`/`bash -c`, and similar) are not auto-safe. Destructive subcommands and flags of allowlisted tools need confirmation (`find -delete`/`-execdir`/`-ok`/`-fprint`/`-fprintf`/`-fls`, `ip link set`, `ip addr flush|add|del`, `ip route add|del`, `hostname <name>`, `date -s`/`--set`, `git branch -d`/`-D`, `git diff --output`). Any write redirection (`>`, `>>`), heredoc/herestring (`<<`), or `tee` still needs confirmation — the AI-reported `is_destructive` flag can only raise risk, never lower it. Recursive `rm` of `/`, `/*`, `~`, `~/`, `$HOME`, or a top-level system directory is forbidden regardless of flag spelling or wrappers; `rm -rf /tmp/build` is not. `mkfs` matches on word boundaries
+- SSH host keys are not trusted silently. The first connection shows the SHA256 fingerprint and continues only after you confirm it. If the key changes, the app shows the stored fingerprint and the new one; you can keep the old key or reset it. Known host keys can be listed and deleted in Settings.
+- Per-server command policy: a deny entry blocks a matching command even when it would otherwise be safe or covered by an always-allow rule. A custom allow entry can skip confirmation only when the command is not in the built-in forbidden set. Always-allow rules stay visible on that screen and can be revoked.
+- `execute_ssh_command`: a command auto-runs only when every segment is still a read-only allowlisted form. Wrappers (`env` with a child command, `sudo`, `nohup`, `xargs`, `timeout`, `nice`, `time`, `command`, `exec`, `sh`/`bash -c`, and similar) are not auto-safe. Destructive subcommands and flags of allowlisted tools need confirmation (`find -delete`/`-execdir`/`-ok`/`-fprint`/`-fprintf`/`-fls`, `ip link set`, `ip addr flush|add|del`, `ip route add|del`, `hostname <name>`, `date -s`/`--set`, `git branch -d`/`-D`, `git diff --output`). Any write redirection (`>`, `>>`), heredoc/herestring (`<<`), or `tee` still needs confirmation — the AI-reported `is_destructive` flag can only raise risk, never lower it. Recursive `rm` of `/`, `/*`, `~`, `~/`, `$HOME`, or a top-level system directory is forbidden regardless of flag spelling or wrappers; `rm -rf /tmp/build` is not. `mkfs` matches on word boundaries (`mkfs.ext4` is forbidden; `notmkfs` is not).
 - `web_fetch`: refuses to fetch non-public addresses (loopback, private ranges, link-local/cloud metadata, CGNAT, IPv6 loopback/ULA) before any remote command runs
 - `web_search`: calls the selected Brave, Exa, AnySearch, or Tavily API directly with the user's Keychain-protected key; it is absent from the model tool list while disabled or unconfigured
 - Parallel tool calls: only calls that the safety gate would auto-run (an allowlist of read-only tools whose arguments evaluate as `safe`) are run concurrently. A write, an approval prompt, or any other tool ends the parallel batch, so nothing after it runs before you approve it. `strict` mode never runs calls in parallel.
