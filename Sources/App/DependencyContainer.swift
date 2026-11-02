@@ -13,6 +13,9 @@ final class DependencyContainer {
     let aiService: UserAIService
     let toolRegistry: ToolRegistry
     let skillRegistry: SkillRegistry
+    /// 用户操作手册及其叠加后的 Skill 查询。工具与模型看到的是这一层，而不是仅包内技能。
+    let runbookCatalog: RunbookCatalog
+    let runbookLaunch: RunbookLaunchService
     let subagentRegistry: SubagentRegistry
     let notificationService: NotificationService
     let memoryService: MemoryService
@@ -101,7 +104,17 @@ final class DependencyContainer {
         self.sshManager = sshMgr
 
         // Skill Registry（使用预加载数据，不再读磁盘）
-        self.skillRegistry = SkillRegistry(preloaded: preloadedSkills)
+        let bundleSkills = SkillRegistry(preloaded: preloadedSkills)
+        self.skillRegistry = bundleSkills
+        let runbookStore = FileRunbookStore(directory: RunbookStorage.directory)
+        try? runbookStore.purgeDeleted(olderThan: PersistenceMaintenance.softDeleteRetentionInterval, now: Date())
+        let skillLookup = MutableSkillLookup(
+            base: bundleSkills,
+            extras: RunbookSkills.skills(from: (try? runbookStore.loadAll()) ?? [])
+        )
+        let catalog = RunbookCatalog(store: runbookStore, skills: skillLookup)
+        self.runbookCatalog = catalog
+        self.runbookLaunch = RunbookLaunchService(catalog: catalog, store: store)
 
         // Subagent Registry（使用预加载数据；需在 Tool Registry 之前就绪，供注入 summaries）
         self.subagentRegistry = SubagentRegistry(preloaded: preloadedSubagents)
@@ -110,8 +123,9 @@ final class DependencyContainer {
         self.keychainService = keychainSvc
 
         // Tool Registry：仅注册本地/用户自有服务工具，不注入平台代理工具。
+        // skillLookup 含用户手册，activate_skill 与系统提示都能看到它们。
         self.toolRegistry = ToolRegistryFactory.makeBaseRegistry(
-            skillRegistry: skillRegistry,
+            skillRegistry: skillLookup,
             keychainService: keychainSvc,
             subagentSummaries: subagentRegistry.subagentSummaries
         )
@@ -119,7 +133,7 @@ final class DependencyContainer {
         self.aiService = UserAIService(
             keychainService: keychainService,
             toolRegistry: toolRegistry,
-            skillRegistry: skillRegistry
+            skillRegistry: skillLookup
         )
         self.notificationService = NotificationService()
 

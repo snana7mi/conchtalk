@@ -26,6 +26,7 @@ ConchTalk is fully bring-your-own-service and has no ConchTalk-operated backend.
 - No ConchTalk-operated backend, account/sign-in, subscription, managed gateway, request relay, or cloud sync
 - Optional bring-your-own web search with Brave, Exa, AnySearch, or Tavily
 - Local-first storage for server metadata, chat history, memories, SSH credentials, and AI credentials
+- Save a finished chat as a runbook and run it again, including from Siri and Shortcuts
 
 ## Connection Modes
 
@@ -62,6 +63,7 @@ None of these flows passes through a ConchTalk account, gateway, relay, or cloud
 
 - Connect to servers using password or SSH key authentication
 - Execute AI-planned multi-step tasks with tool calls
+- Save a finished conversation as a runbook Skill, run it again from the list, or start it from Siri and Shortcuts. The replay still goes through the normal per-server approval flow
 - Dispatch parallel subagents for specialized, context-isolated subtasks
 - Read, write, edit, search, and upload files on remote systems
 - Search the live web through Brave, Exa, AnySearch, or Tavily with your own provider API key

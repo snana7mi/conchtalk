@@ -36,7 +36,7 @@ struct ConchTalkApp: App {
 
     // SSH 连接导航
     @State private var connectionState: ServerConnectionState = .idle
-    @State private var connectTask: Task<Void, Never>?
+    @State private var connectTask: Task<Bool, Never>?
     @State private var connectionGeneration: UInt = 0
     @State private var connectionProgressViewModel: SSHConnectionProgressViewModel?
     /// 主机密钥不匹配时，记录待重连的服务器（用于"信任新密钥"后重试）。
@@ -107,6 +107,10 @@ struct ConchTalkApp: App {
                                     await container.sshManager.disconnect(from: serverID)
                                     container.removeChatViewModel(for: serverID)
                                 }
+                            },
+                            runbookCatalog: container.runbookCatalog,
+                            onRunRunbook: { server, prompt in
+                                connectAndNavigate(to: server, thenSend: prompt)
                             }
                         )
                         .navigationDestination(item: $selectedServer) { server in
@@ -114,7 +118,8 @@ struct ConchTalkApp: App {
                                 viewModel: container.makeChatViewModel(for: server),
                                 onDisconnect: { serverID in
                                     container.removeChatViewModel(for: serverID)
-                                }
+                                },
+                                runbookCatalog: container.runbookCatalog
                             )
                         }
                     }
@@ -152,6 +157,20 @@ struct ConchTalkApp: App {
                         Spacer()
                     }
                 }
+            }
+        }
+        .onChange(of: container.runbookLaunch.request) { _, request in
+            guard let request else { return }
+            selectedTab = .servers
+            Task {
+                let started = await connectAndNavigate(to: request.server, thenSend: request.prompt).value
+                container.runbookLaunch.consume(request, success: started)
+            }
+        }
+        .task {
+            let launch = container.runbookLaunch
+            RunbookIntentBridge.shared.register { runbookID, serverName in
+                await launch.launch(runbookID: runbookID, serverName: serverName)
             }
         }
         .alert("Unsaved Changes", isPresented: $showUnsavedChangesAlert) {
@@ -338,8 +357,10 @@ struct ConchTalkApp: App {
     // MARK: - SSH 连接导航
 
     /// 连接到服务器并导航。已连接时直接跳转，否则全屏 Loading 后跳转。
-    private func connectAndNavigate(to server: Server) {
-        guard let container else { return }
+    /// `thenSend` 在连接成功后作为一条用户消息发出，用于重跑操作手册。
+    @discardableResult
+    private func connectAndNavigate(to server: Server, thenSend prompt: String? = nil) -> Task<Bool, Never> {
+        guard let container else { return Task { false } }
         connectTask?.cancel()
         connectTask = nil
         if case .connecting = connectionState { connectionState = .idle }
@@ -350,21 +371,22 @@ struct ConchTalkApp: App {
         let sshManager = container.sshManager
         let keychainService = container.keychainService
 
-        connectTask = Task {
+        let task = Task { () -> Bool in
             // 快速路径：已连接
             let isAlive = await sshManager.isConnected(serverID: server.id)
             if isAlive {
-                guard myGeneration == connectionGeneration else { return }
+                guard myGeneration == connectionGeneration else { return false }
                 connectionState = .idle
                 let vm = container.makeChatViewModel(for: server)
                 await vm.loadMessages()
                 vm.isConnected = true
                 selectedServer = server
-                return
+                sendPreparedPrompt(prompt, viewModel: vm)
+                return true
             }
 
             // 显示连接进度
-            guard myGeneration == connectionGeneration else { return }
+            guard myGeneration == connectionGeneration else { return false }
             let progressVM = SSHConnectionProgressViewModel(server: server)
             connectionProgressViewModel = progressVM
             connectionState = .connecting(serverID: server.id)
@@ -387,7 +409,7 @@ struct ConchTalkApp: App {
                 try Task.checkCancellation()
                 progressVM.reportConnectionResult(.success(()))
             } catch is CancellationError {
-                return
+                return false
             } catch let sshError as SSHError {
                 connectError = sshError.localizedDescription
                 // 主机密钥不匹配时记录服务器，以便用户选择信任新密钥后重连
@@ -403,12 +425,13 @@ struct ConchTalkApp: App {
             _ = await animationDone
             await progressVM.waitForCompletion()
 
-            guard myGeneration == connectionGeneration else { return }
+            guard myGeneration == connectionGeneration else { return false }
 
             if let errorMsg = connectError {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     connectionState = .failed(serverID: server.id, message: errorMsg)
                 }
+                return false
             } else {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     connectionState = .idle
@@ -418,8 +441,20 @@ struct ConchTalkApp: App {
                 await vm.loadMessages()
                 vm.isConnected = true
                 selectedServer = server
+                sendPreparedPrompt(prompt, viewModel: vm)
+                return true
             }
         }
+        connectTask = task
+        return task
+    }
+
+    /// 把准备好的提示词当作一条用户消息发送。
+    private func sendPreparedPrompt(_ prompt: String?, viewModel: ChatViewModel) {
+        let text = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !text.isEmpty else { return }
+        viewModel.inputText = text
+        viewModel.sendMessage()
     }
 
     /// 处理通知点击导航：跳转到对应服务器的聊天页面。

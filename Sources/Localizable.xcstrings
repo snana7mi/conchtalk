@@ -4736,6 +4736,132 @@
           }
         }
       }
+    },
+    "A runbook needs at least one user request." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックには少なくとも1件のユーザー依頼が必要です。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作手册至少需要一条用户请求。" } }
+      }
+    },
+    "Could not connect to %@." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ に接続できませんでした。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法连接到 %@。" } }
+      }
+    },
+    "Could not find a server named %@." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ という名前のサーバーが見つかりません。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到名为 %@ 的服务器。" } }
+      }
+    },
+    "Could not find that runbook." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "そのランブックは見つかりません。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到该操作手册。" } }
+      }
+    },
+    "Enter a name" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "名前を入力" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入名称" } }
+      }
+    },
+    "No runbooks yet" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックはまだありません" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有操作手册" } }
+      }
+    },
+    "Opening ConchTalk to run the runbook." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックを実行するために ConchTalk を開いています。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在打开 ConchTalk 以运行操作手册。" } }
+      }
+    },
+    "Run" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "実行" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "运行" } }
+      }
+    },
+    "Run a saved runbook on one of your servers." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存したランブックをサーバーの一台で実行します。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在你的一台服务器上运行已保存的操作手册。" } }
+      }
+    },
+    "Run on this server" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "このサーバーで実行" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在此服务器上运行" } }
+      }
+    },
+    "Run Runbook" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックを実行" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "运行操作手册" } }
+      }
+    },
+    "Runbook" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブック" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作手册" } }
+      }
+    },
+    "Runbook name" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブック名" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "手册名称" } }
+      }
+    },
+    "Runbooks" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブック" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作手册" } }
+      }
+    },
+    "Save a finished conversation, then run it again on any server." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "完了した会話を保存し、どのサーバーでも再実行できます。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "把已完成的对话保存下来，之后可在任意服务器上再次运行。" } }
+      }
+    },
+    "Save as Runbook" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックとして保存" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存为操作手册" } }
+      }
+    },
+    "Saved runbooks become skills the assistant can activate." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存したランブックは、アシスタントが呼び出せる Skill になります。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存后的操作手册会成为助手可激活的 Skill。" } }
+      }
+    },
+    "Server name" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "サーバー名" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器名称" } }
+      }
+    },
+    "Several servers match %@. Use the full name." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ に一致するサーバーが複数あります。完全な名前を指定してください。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有多台服务器匹配 %@。请使用完整名称。" } }
+      }
+    },
+    "Started %@ on %@." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%2$@ で %1$@ を開始しました。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已在 %2$@ 上开始 %1$@。" } }
+      }
+    },
+    "This conversation cannot be saved yet. Wait until the assistant finishes successfully." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "この会話はまだ保存できません。アシスタントが正常に終了するまで待ってください。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这次对话还不能保存。请等助手成功完成后再试。" } }
+      }
     }
   },
   "version" : "1.1"
