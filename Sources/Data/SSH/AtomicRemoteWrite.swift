@@ -4,7 +4,7 @@ import Foundation
 /// AtomicRemoteWrite：
 /// 先把内容写到目标同目录的临时文件，再用 `mv -f` 替换。
 /// 同一文件系统上的 rename 会一次换成完整内容，避免写到一半留下截断文件。
-enum AtomicRemoteWrite {
+nonisolated enum AtomicRemoteWrite {
     /// 目标同目录下的隐藏临时路径。
     static func temporaryPath(for destination: String, token: String = UUID().uuidString) -> String {
         let trimmed = destination.trimmingCharacters(in: .whitespacesAndNewlines)

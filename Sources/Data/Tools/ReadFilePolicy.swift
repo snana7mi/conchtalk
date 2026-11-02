@@ -4,7 +4,7 @@ import Foundation
 /// ReadFilePolicy：
 /// 读取前的纯判断：敏感路径要确认，超限与二进制内容拒绝装入内存，
 /// 行号至少从 1 开始，避免 `sed -n '0,...p'`。
-enum ReadFilePolicy {
+nonisolated enum ReadFilePolicy {
     /// 单次读入内存的上限（1 MiB）。
     static let maxBytes = 1_048_576
     /// 判断是否为二进制时只看的前缀长度。

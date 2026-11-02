@@ -15,7 +15,7 @@ struct SSHConnectionIntegrationTests {
     @Test
     func connectWithPassword() async throws {
         let config = try #require(IntegrationTestConfig.load())
-        let client = NIOSSHClient()
+        let client = IntegrationTestConfig.makeSSHClient()
         defer { Task { await client.disconnect() } }
 
         let server = config.makeServer()
@@ -36,7 +36,7 @@ struct SSHConnectionIntegrationTests {
     @Test
     func disconnectCleanly() async throws {
         let config = try #require(IntegrationTestConfig.load())
-        let client = NIOSSHClient()
+        let client = IntegrationTestConfig.makeSSHClient()
 
         let server = config.makeServer()
         try await client.connect(
@@ -59,7 +59,7 @@ struct SSHConnectionIntegrationTests {
     @Test
     func connectWithWrongPassword() async throws {
         let config = try #require(IntegrationTestConfig.load())
-        let client = NIOSSHClient()
+        let client = IntegrationTestConfig.makeSSHClient()
         defer { Task { await client.disconnect() } }
 
         let server = config.makeServer()
@@ -81,7 +81,7 @@ struct SSHConnectionIntegrationTests {
     @Test
     func connectToUnreachableHost() async throws {
         _ = try #require(IntegrationTestConfig.load())
-        let client = NIOSSHClient()
+        let client = IntegrationTestConfig.makeSSHClient()
         defer { Task { await client.disconnect() } }
 
         let unreachableServer = Server(
@@ -108,7 +108,7 @@ struct SSHConnectionIntegrationTests {
     @Test
     func reconnectAfterDisconnect() async throws {
         let config = try #require(IntegrationTestConfig.load())
-        let client = NIOSSHClient()
+        let client = IntegrationTestConfig.makeSSHClient()
         defer { Task { await client.disconnect() } }
 
         let server = config.makeServer()

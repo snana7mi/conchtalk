@@ -4,7 +4,7 @@ import Foundation
 /// RemoteFileHistory：
 /// 文件已存在且不超过上限时，在远端 `cp -p` 保留模式与属主。
 /// 文件不存在时只记一条「回滚即删除」的记录。复制失败则中止写入。
-enum RemoteFileHistory {
+nonisolated enum RemoteFileHistory {
     /// 单次快照复制上限。再大的文件仍允许写入，但这次变更不能回滚。
     static let maxSnapshotBytes: UInt64 = 32 * 1024 * 1024
 

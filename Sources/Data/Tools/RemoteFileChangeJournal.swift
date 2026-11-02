@@ -11,7 +11,7 @@ actor RemoteFileChangeJournal {
     static let maxDepth = 20
 
     /// 一次写入前的原文件记录。
-    struct Snapshot: Sendable, Equatable {
+    nonisolated struct Snapshot: Sendable, Equatable {
         let id: String
         let path: String
         /// 远端快照路径。新建文件或超限跳过时为 nil。

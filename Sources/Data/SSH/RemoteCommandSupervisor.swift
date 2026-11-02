@@ -4,7 +4,7 @@ import Foundation
 /// RemoteCommandSupervisor：
 /// 生成远端包装脚本：优先 `setsid` 记录会话首领 PID，到时 `kill` 进程组。
 /// SSH 连接保持不动；只有包装脚本自己退出后，执行通道才会结束。
-enum RemoteCommandSupervisor {
+nonisolated enum RemoteCommandSupervisor {
     /// 工具层允许的最短超时（秒）。
     static let minimumTimeout: TimeInterval = 1
     /// 工具层允许的最长超时（秒）。

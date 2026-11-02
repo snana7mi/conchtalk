@@ -4,7 +4,7 @@ import Foundation
 /// ToolArguments：
 /// 模型传入的 JSON 数字可能是 Int、Double 或 NSNumber。
 /// 这里统一解码，并忽略被桥接成数字的布尔值。
-enum ToolArguments {
+nonisolated enum ToolArguments {
     /// 读取整数。布尔值与非整数浮点返回 nil。
     static func int(_ value: Any?) -> Int? {
         if value is Bool { return nil }

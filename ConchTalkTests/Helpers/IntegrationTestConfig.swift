@@ -124,9 +124,14 @@ nonisolated struct IntegrationTestConfig: Sendable, Codable {
         )
     }
 
+    /// 创建未连接的客户端。集成测试显式接受指纹，生产路径必须走用户确认。
+    static func makeSSHClient() -> NIOSSHClient {
+        NIOSSHClient(hostKeyPrompter: TrustingHostKeyPrompter())
+    }
+
     /// 创建并连接 NIOSSHClient，返回已建立连接的客户端实例。
     func connectSSH() async throws -> NIOSSHClient {
-        let client = NIOSSHClient()
+        let client = Self.makeSSHClient()
         let server = makeServer()
         try await client.connect(to: server, password: password, sshKeyData: nil, keyPassphrase: nil)
         return client
@@ -177,4 +182,9 @@ nonisolated struct IntegrationTestConfig: Sendable, Codable {
         }
         return (nioClient, citadel)
     }
+}
+
+/// TrustingHostKeyPrompter：集成测试接受主机指纹，生产界面不会使用它。
+nonisolated struct TrustingHostKeyPrompter: HostKeyPrompting {
+    func decide(_ prompt: HostKeyPrompt) async -> HostKeyPromptDecision { .accept }
 }

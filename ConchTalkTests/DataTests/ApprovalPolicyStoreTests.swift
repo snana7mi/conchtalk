@@ -89,4 +89,58 @@ struct ApprovalPolicyStoreTests {
             arguments: ["path": "/srv/a.conf"], permissionLevel: .strict)
         #expect(none == nil)
     }
+
+    @Test("拒绝列表压过始终允许和会话信任")
+    func denyOverridesRememberedRules() async throws {
+        let policies = CommandPolicyStore(fileURL: temporaryPolicyURL())
+        let sid = UUID()
+        let policy = ApprovalPolicyStore(store: try makeStore(), commandPolicies: policies)
+        try await policyStoreRule(policy, server: sid, tokens: ["ls"])
+        await policy.trustForSession(serverID: sid, matcher: .commandPrefix(tokens: ["ls"]))
+        #expect(await policies.save(ServerCommandPolicy(allow: ["ls"], deny: ["ls"]), for: sid))
+        let ok = await policy.autoApproves(serverID: sid, toolName: "execute_ssh_command",
+            arguments: ["command": "ls -la"], permissionLevel: .standard)
+        #expect(ok == false)
+        let suggested = await policy.suggestRule(serverID: sid, toolName: "execute_ssh_command",
+            arguments: ["command": "ls -la"], permissionLevel: .standard)
+        #expect(suggested == nil)
+    }
+
+    @Test("允许列表可以自动放行非禁止命令")
+    func customAllowAutoApproves() async throws {
+        let policies = CommandPolicyStore(fileURL: temporaryPolicyURL())
+        let sid = UUID()
+        let policy = ApprovalPolicyStore(store: try makeStore(), commandPolicies: policies)
+        #expect(await policies.save(ServerCommandPolicy(allow: ["systemctl restart nginx"], deny: []), for: sid))
+        let ok = await policy.autoApproves(serverID: sid, toolName: "execute_ssh_command",
+            arguments: ["command": "systemctl restart nginx"], permissionLevel: .standard)
+        #expect(ok == true)
+        let strict = await policy.autoApproves(serverID: sid, toolName: "execute_ssh_command",
+            arguments: ["command": "systemctl restart nginx"], permissionLevel: .strict)
+        #expect(strict == false)
+    }
+
+    @Test("允许列表不能放行禁止命令")
+    func customAllowCannotPermitForbidden() async throws {
+        let policies = CommandPolicyStore(fileURL: temporaryPolicyURL())
+        let sid = UUID()
+        let policy = ApprovalPolicyStore(store: try makeStore(), commandPolicies: policies)
+        #expect(await policies.save(ServerCommandPolicy(allow: ["rm -rf /"], deny: []), for: sid))
+        let ok = await policy.autoApproves(serverID: sid, toolName: "execute_ssh_command",
+            arguments: ["command": "rm -rf /"], permissionLevel: .permissive)
+        #expect(ok == false)
+    }
+
+    private func temporaryPolicyURL() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("command-policy-\(UUID().uuidString).json")
+    }
+
+    private func policyStoreRule(_ policy: ApprovalPolicyStore, server: UUID, tokens: [String]) async throws {
+        let rule = ApprovalRule(
+            id: UUID(), serverID: server, toolName: "execute_ssh_command",
+            matcher: .commandPrefix(tokens: tokens), displayLabel: tokens.joined(separator: " "),
+            createdAt: Date(), modifiedAt: Date()
+        )
+        await policy.save(rule)
+    }
 }

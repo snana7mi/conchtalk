@@ -10,12 +10,13 @@ import os
 /// NIOSSHClient：
 /// `SSHClientProtocol` 的具体实现，负责维护单连接状态、
 /// 处理密码/私钥认证并执行远端命令流读取。
-/// 支持主机密钥 TOFU 验证、连接保活、命令超时与流式输出。
+/// 支持主机密钥指纹确认、连接保活、命令超时与流式输出。
 actor NIOSSHClient: SSHClientProtocol {
     private var client: SSHClient?
     private var _isConnected = false
     private var keepAliveTask: Task<Void, Never>?
     private let knownHostsStore: KnownHostsStore
+    private let hostKeyPrompter: (any HostKeyPrompting)?
     private var _capabilities: ServerCapabilities = .unknown
 
     /// 断线回调：keepalive 检测到连接丢失时触发，通知上层（SSHSessionManager）立即更新 UI 状态。
@@ -53,9 +54,12 @@ actor NIOSSHClient: SSHClientProtocol {
     // MARK: - Initialization
 
     /// 初始化 SSH 客户端。
-    /// - Parameter knownHostsStore: 已知主机密钥存储；传 `nil` 使用默认实例。
-    init(knownHostsStore: KnownHostsStore? = nil) {
+    /// - Parameters:
+    ///   - knownHostsStore: 已知主机密钥存储；传 `nil` 使用默认实例。
+    ///   - hostKeyPrompter: 首次连接和密钥变化时的确认器。传 `nil` 则拒绝未知或变化的密钥，不会静默信任。
+    init(knownHostsStore: KnownHostsStore? = nil, hostKeyPrompter: (any HostKeyPrompting)? = nil) {
         self.knownHostsStore = knownHostsStore ?? KnownHostsStore()
+        self.hostKeyPrompter = hostKeyPrompter
     }
 
     // MARK: - Connect
@@ -91,8 +95,12 @@ actor NIOSSHClient: SSHClientProtocol {
             authMethod = try Self.parsePrivateKey(keyString: keyString, username: server.username, passphrase: keyPassphrase)
         }
 
-        // 构建基于 KnownHostsStore 的主机密钥校验器（TOFU）
-        let hostKeyValidator = await knownHostsStore.makeValidator(host: server.host, port: server.port)
+        // 首次连接展示指纹并等待确认；没有确认器时失败关闭，不自动信任。
+        let hostKeyValidator = await knownHostsStore.makeValidator(
+            host: server.host,
+            port: server.port,
+            prompter: hostKeyPrompter
+        )
 
         do {
             let sshClient = try await SSHClient.connect(
@@ -636,6 +644,10 @@ enum SSHError: LocalizedError, Equatable {
     case commandFailed(String)
     case timeout
     case hostKeyMismatch(host: String, stored: String, received: String)
+    /// 用户拒绝了这枚主机密钥。`stored == nil` 表示首次连接。
+    case hostKeyRejected(host: String, stored: String?, received: String)
+    /// 没有确认器，未知主机密钥不会被写入。
+    case hostKeyConfirmationRequired(host: String, fingerprint: String)
 
     /// 适用于 UI 展示的本地化错误文案。
     var errorDescription: String? {
@@ -646,7 +658,26 @@ enum SSHError: LocalizedError, Equatable {
         case .commandFailed(let msg): return String(localized: "Command failed: \(msg)")
         case .timeout: return String(localized: "Connection timed out. Please check your network and server address.")
         case .hostKeyMismatch(let host, let stored, let received):
-            return String(localized: "Host key mismatch for \(host). Expected fingerprint \(stored), but received \(received). This may indicate a man-in-the-middle attack.")
+            return String(
+                localized: "Host key mismatch for \(host). Expected fingerprint \(HostKeyFingerprint.openSSH(hex: stored)), but received \(HostKeyFingerprint.openSSH(hex: received)). This may indicate a man-in-the-middle attack.",
+                bundle: LanguageSettings.currentBundle
+            )
+        case .hostKeyRejected(let host, let stored, let received):
+            if let stored {
+                return String(
+                    localized: "You did not trust the new host key for \(host). Stored fingerprint \(HostKeyFingerprint.openSSH(hex: stored)), received \(HostKeyFingerprint.openSSH(hex: received)).",
+                    bundle: LanguageSettings.currentBundle
+                )
+            }
+            return String(
+                localized: "You did not trust the host key for \(host). Fingerprint: \(HostKeyFingerprint.openSSH(hex: received)).",
+                bundle: LanguageSettings.currentBundle
+            )
+        case .hostKeyConfirmationRequired(let host, let fingerprint):
+            return String(
+                localized: "The host key for \(host) needs confirmation before it can be trusted. Fingerprint: \(HostKeyFingerprint.openSSH(hex: fingerprint)).",
+                bundle: LanguageSettings.currentBundle
+            )
         }
     }
 }

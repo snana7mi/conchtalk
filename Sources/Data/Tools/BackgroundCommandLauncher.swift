@@ -4,7 +4,7 @@ import Foundation
 /// BackgroundCommandLauncher：
 /// 生成脱离 SSH 通道的启动脚本，以及只允许读取本目录日志的轮询脚本。
 /// 远程进程自行保活；前台 agent 任务若还在跑，现有 Live Activity 会继续显示当前步骤。
-enum BackgroundCommandLauncher {
+nonisolated enum BackgroundCommandLauncher {
     /// 后台日志与 PID 的固定目录。轮询工具拒绝这个目录以外的路径。
     static let directory = "/tmp/conchtalk-bg"
     /// 单次轮询最多返回的行数。
