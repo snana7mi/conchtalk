@@ -31,6 +31,9 @@ final class DependencyContainer {
     /// 授权策略存储（具体类型，供 Trusted Actions UI 读取/撤销规则）。
     let approvalPolicyStore: ApprovalPolicyStore
 
+    /// 定时健康检查。后台刷新每次最多跑一台服务器。
+    let healthChecks: HealthCheckCoordinator
+
     // MARK: - 新架构协调器
 
     /// 任务执行协调器（编排 AI 任务的排队、执行、审批、生命周期）。
@@ -189,6 +192,42 @@ final class DependencyContainer {
         notifSvc.onNotificationApproval = { serverID, outcome in
             tec.resolveToolCall(for: serverID, outcome: outcome)
         }
+
+        let healthStore = FileHealthCheckStore(directory: HealthCheckStorage.directory)
+        self.healthChecks = HealthCheckCoordinator(
+            store: healthStore,
+            scheduler: SystemHealthRefreshScheduler(),
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.cheung.ConchTalk",
+            serverLookup: { serverID in
+                (try? await swiftDataStore.fetchServers())?.first { $0.id == serverID }
+            },
+            probe: { server, thresholds in
+                await HealthCheckProber.probe(
+                    server: server,
+                    thresholds: thresholds,
+                    sshManager: sshMgr,
+                    keychain: keychainSvc
+                )
+            },
+            notify: { server, breaches in
+                notifSvc.sendHealthAlert(
+                    serverName: server.name,
+                    serverID: server.id,
+                    message: HealthAlertMessage.body(breaches: breaches)
+                )
+            }
+        )
+    }
+
+    private var healthModelCache: HealthCheckSettingsModel?
+
+    func makeHealthCheckModel() -> HealthCheckSettingsModel {
+        if let healthModelCache { return healthModelCache }
+        let model = HealthCheckSettingsModel(coordinator: healthChecks) { [store] in
+            (try? await store.fetchServers()) ?? []
+        }
+        healthModelCache = model
+        return model
     }
 
     /// chatViewModelCache：按 server ID 缓存 ChatViewModel，返回时保持直连模式等状态。

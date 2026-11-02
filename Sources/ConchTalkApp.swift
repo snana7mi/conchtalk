@@ -45,6 +45,11 @@ struct ConchTalkApp: App {
     // 过期服务器清理提示
     @State private var expiredServerToast: String?
 
+    init() {
+        // 必须在启动完成前注册，后台刷新拉起 App 时系统才会把任务交过来。
+        HealthCheckBridge.shared.registerSystem()
+    }
+
     /// 根据用户选择返回对应的 Locale，跟随系统时返回 nil。
     private var overrideLocale: Locale? {
         selectedLanguage.locale
@@ -125,7 +130,8 @@ struct ConchTalkApp: App {
                             selectedLanguage: $selectedLanguage,
                             sshKeyManagementViewModel: container.makeSSHKeyManagementViewModel(),
                             reportUnsavedChanges: $settingsHasUnsavedChanges,
-                            triggerSave: $triggerSettingsSave
+                            triggerSave: $triggerSettingsSave,
+                            healthModel: container.makeHealthCheckModel()
                         )
                     }
                 }
@@ -202,6 +208,7 @@ struct ConchTalkApp: App {
         }
         .environment(\.locale, overrideLocale ?? .autoupdatingCurrent)
         .task {
+            container.healthChecks.start()
             await SSHKeyMigrationService.migrateIfNeeded(
                 store: container.store,
                 keychainService: container.keychainService

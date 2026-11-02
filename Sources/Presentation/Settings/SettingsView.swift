@@ -33,6 +33,7 @@ struct SettingsView: View {
     var sshKeyManagementViewModel: SSHKeyManagementViewModel
     @Binding private var reportUnsavedChanges: Bool
     @Binding private var triggerSave: Bool
+    var healthModel: HealthCheckSettingsModel?
 
     private var hasUnsavedChanges: Bool {
         apiKey != savedSettings.apiKey
@@ -53,12 +54,14 @@ struct SettingsView: View {
         selectedLanguage: Binding<AppLanguage>,
         sshKeyManagementViewModel: SSHKeyManagementViewModel,
         reportUnsavedChanges: Binding<Bool> = .constant(false),
-        triggerSave: Binding<Bool> = .constant(false)
+        triggerSave: Binding<Bool> = .constant(false),
+        healthModel: HealthCheckSettingsModel? = nil
     ) {
         _selectedLanguage = selectedLanguage
         self.sshKeyManagementViewModel = sshKeyManagementViewModel
         _reportUnsavedChanges = reportUnsavedChanges
         _triggerSave = triggerSave
+        self.healthModel = healthModel
 
         let settings = AISettings.load()
         let webSearchSettings = WebSearchSettings.load()
@@ -103,6 +106,19 @@ struct SettingsView: View {
             }
 
             saveSection
+
+            if let healthModel {
+                Section(String(localized: "Health Checks", bundle: LanguageSettings.currentBundle)) {
+                    NavigationLink {
+                        HealthCheckSettingsView(model: healthModel)
+                    } label: {
+                        Label(
+                            String(localized: "Scheduled checks", bundle: LanguageSettings.currentBundle),
+                            systemImage: "heart.text.square"
+                        )
+                    }
+                }
+            }
 
             Section(String(localized: "About", bundle: LanguageSettings.currentBundle)) {
                 LabeledContent(

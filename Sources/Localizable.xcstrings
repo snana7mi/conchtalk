@@ -4736,6 +4736,120 @@
           }
         }
       }
+    },
+    "A service name is not safe to check." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "サービス名を安全に確認できません。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务名无法安全检查。" } }
+      }
+    },
+    "Disk %@ is %d%% (limit %d%%)." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ディスク %@ は %d%% 使用中です（上限 %d%%）。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "磁盘 %@ 已使用 %d%%（上限 %d%%）。" } }
+      }
+    },
+    "Disk alert at %d%%" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ディスク警告 %d%%" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "磁盘告警线 %d%%" } }
+      }
+    },
+    "Every 15 minutes" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "15分ごと" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每 15 分钟" } }
+      }
+    },
+    "Every 30 minutes" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "30分ごと" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每 30 分钟" } }
+      }
+    },
+    "Every 6 hours" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "6時間ごと" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每 6 小时" } }
+      }
+    },
+    "Every day" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "毎日" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每天" } }
+      }
+    },
+    "Every hour" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "1時間ごと" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每小时" } }
+      }
+    },
+    "Health Checks" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ヘルスチェック" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "健康检查" } }
+      }
+    },
+    "Healthy" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "正常" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正常" } }
+      }
+    },
+    "Interval" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "間隔" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "间隔" } }
+      }
+    },
+    "Last result" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "前回の結果" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近一次结果" } }
+      }
+    },
+    "Load alert at %.1f" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "負荷警告 %.1f" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "负载告警线 %.1f" } }
+      }
+    },
+    "Load average %.2f is at or above %.2f." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ロードアベレージ %.2f が %.2f 以上です。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "负载 %.2f，已达到或超过 %.2f。" } }
+      }
+    },
+    "Scheduled checks" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "定期チェック" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "定时检查" } }
+      }
+    },
+    "Server not found" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "サーバーが見つかりません" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到服务器" } }
+      }
+    },
+    "Service %@ is %@." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "サービス %@ は %@ です。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务 %@ 状态为 %@。" } }
+      }
+    },
+    "Services, comma separated" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "サービス名（カンマ区切り）" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务名，用逗号分隔" } }
+      }
+    },
+    "iOS chooses when a background refresh runs. Checks cannot be promised more often than about 15 minutes, and each wake checks one server. Force quit, Low Power Mode, or a short execution window can delay or skip a check." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バックグラウンド更新の実行時刻は iOS が決めます。約15分より短い間隔は保証できず、1回の起動で確認するのは1台です。強制終了、低電力モード、短い実行時間で遅れたり飛ばされたりします。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "iOS 决定后台刷新何时运行。检查不能保证短于大约 15 分钟，每次唤醒只检查一台服务器。强制退出、低电量模式或过短的执行窗口都可能推迟或跳过检查。" } }
+      }
     }
   },
   "version" : "1.1"
