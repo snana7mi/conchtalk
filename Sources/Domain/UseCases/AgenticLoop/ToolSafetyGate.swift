@@ -46,8 +46,22 @@ nonisolated enum ToolSafetyGate {
         onAgentEvents: @MainActor @escaping @Sendable ([AgentStreamEvent]) -> Void
     ) async -> ToolGateResult {
         let rawSafety = tool.validateSafety(arguments: arguments)
-        let effectiveSafety = permissionLevel.effectiveSafetyLevel(rawSafety)
-        // 写操作属性来自工具原始分级，不应被 strict/permissive 的审批映射改变。
+        let policyAdjusted = await Self.adjustForCommandPolicy(
+            rawSafety,
+            toolName: tool.name,
+            arguments: arguments,
+            serverID: serverID,
+            policyStore: policyStore
+        )
+        // 允许列表可以跳过命令本身的确认，但不能把后台启动降成自动执行。
+        // 后台模式会留下进程和日志；禁止与拒绝列表的结果保持不变。
+        let safetyAfterPolicy = keepBackgroundConfirmation(
+            policyAdjusted,
+            toolName: tool.name,
+            arguments: arguments
+        )
+        let effectiveSafety = permissionLevel.effectiveSafetyLevel(safetyAfterPolicy)
+        // 写操作属性来自工具原始分级，不应被 strict/permissive 或允许列表的审批映射改变。
         let hadWrite = rawSafety == .needsConfirmation
 
         switch effectiveSafety {
@@ -110,5 +124,36 @@ nonisolated enum ToolSafetyGate {
         case .forbidden:
             return .forbidden
         }
+    }
+
+    /// 只对 `execute_ssh_command` 叠加服务器词表。拒绝与内置禁止优先；允许列表不能放行禁止命令。
+    private static func adjustForCommandPolicy(
+        _ raw: SafetyLevel,
+        toolName: String,
+        arguments: [String: Any],
+        serverID: UUID?,
+        policyStore: ApprovalPolicyProviding
+    ) async -> SafetyLevel {
+        guard toolName == "execute_ssh_command",
+              let serverID,
+              let command = arguments["command"] as? String else {
+            return raw
+        }
+        let policy = await policyStore.commandPolicy(for: serverID)
+        return CommandHardening.applying(policy, to: raw, command: command)
+    }
+
+    /// `background: true` 在允许列表命中后仍需要确认。禁止和拒绝不受影响。
+    private static func keepBackgroundConfirmation(
+        _ adjusted: SafetyLevel,
+        toolName: String,
+        arguments: [String: Any]
+    ) -> SafetyLevel {
+        guard toolName == "execute_ssh_command",
+              adjusted == .safe,
+              ToolArguments.bool(arguments["background"]) else {
+            return adjusted
+        }
+        return .needsConfirmation
     }
 }

@@ -7,13 +7,14 @@ import SwiftUI
 struct ServerInfoView: View {
     @State private var viewModel: ServerInfoViewModel
     @State private var pulseAnimation = false
-    private let serverID: UUID
-    private let approvalPolicyStore: ApprovalPolicyStore
+    @State private var commandPolicyViewModel: CommandPolicyEditorViewModel
 
     init(server: Server, sshClient: SSHClientProtocol, approvalPolicyStore: ApprovalPolicyStore) {
         _viewModel = State(initialValue: ServerInfoViewModel(server: server, sshClient: sshClient))
-        self.serverID = server.id
-        self.approvalPolicyStore = approvalPolicyStore
+        _commandPolicyViewModel = State(initialValue: CommandPolicyEditorViewModel(
+            policyStore: approvalPolicyStore,
+            serverID: server.id
+        ))
     }
 
     var body: some View {
@@ -33,6 +34,16 @@ struct ServerInfoView: View {
         }
         .navigationTitle(String(localized: "Server Info", bundle: LanguageSettings.currentBundle))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                NavigationLink {
+                    CommandPolicyEditorView(viewModel: commandPolicyViewModel)
+                } label: {
+                    Image(systemName: "checklist")
+                }
+                .accessibilityLabel(String(localized: "Command Policy", bundle: LanguageSettings.currentBundle))
+            }
+        }
         .task {
             await viewModel.startMonitoring()
         }
@@ -219,25 +230,20 @@ struct ServerInfoView: View {
 
     // MARK: - 信任操作入口
 
-    /// Trusted Actions 入口卡片：进入按服务器记忆的「始终允许」规则管理页。
+    /// 命令策略入口：允许/拒绝列表，以及已保存的「始终允许」规则。
     private var trustedActionsCard: some View {
         NavigationLink {
-            TrustedActionsView(
-                viewModel: TrustedActionsViewModel(
-                    policyStore: approvalPolicyStore,
-                    serverID: serverID
-                )
-            )
+            CommandPolicyEditorView(viewModel: commandPolicyViewModel)
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "checkmark.shield")
+                Image(systemName: "checklist")
                     .font(.title3)
                     .foregroundStyle(.green)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "Trusted Actions", bundle: LanguageSettings.currentBundle))
+                    Text(String(localized: "Command Policy", bundle: LanguageSettings.currentBundle))
                         .font(.headline)
                         .foregroundStyle(.primary)
-                    Text(String(localized: "Manage always-allowed commands and paths for this server.", bundle: LanguageSettings.currentBundle))
+                    Text(String(localized: "Manage allow and deny lists, and review always-allowed actions for this server.", bundle: LanguageSettings.currentBundle))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)

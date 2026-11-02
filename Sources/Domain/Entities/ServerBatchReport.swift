@@ -26,7 +26,7 @@ nonisolated struct ServerBatchReport: Equatable, Sendable {
 }
 
 /// ServerBatchExecuting：在一台服务器上执行提示词。实现必须使用该服务器自己的审批通道。
-protocol ServerBatchExecuting: Sendable {
+nonisolated protocol ServerBatchExecuting: Sendable {
     func run(server: Server, prompt: String) async -> ServerBatchServerResult
 }
 

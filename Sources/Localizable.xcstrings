@@ -3871,6 +3871,601 @@
         }
       }
     },
+    "Added" : {
+      "comment" : "The date a host key was trusted.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "追加日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加于"
+          }
+        }
+      }
+    },
+    "Allow List" : {
+      "comment" : "The list of commands the user allows on a server.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "許可リスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许列表"
+          }
+        }
+      }
+    },
+    "An entry matches a command segment that starts with the same words. The deny list blocks a match even when the command would otherwise run automatically." : {
+      "comment" : "Explains how command allow and deny entries are matched.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エントリは、同じ語で始まるコマンド部分に一致します。拒否リストに一致すると、本来自動実行されるコマンドでもブロックされます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "条目会匹配以相同单词开头的命令段。拒绝列表命中后，即使这条命令本来会自动执行，也会被拦住。"
+          }
+        }
+      }
+    },
+    "Blocked: %@ matches this server's deny list and was not run." : {
+      "comment" : "Shown when a command matches the server deny list. The argument is the command.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブロック：%1$@ はこのサーバーの拒否リストに一致したため、実行されませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拦截：%1$@ 命中了这台服务器的拒绝列表，未执行。"
+          }
+        }
+      }
+    },
+    "Command Pattern" : {
+      "comment" : "Placeholder for a command pattern field.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コマンド"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "命令"
+          }
+        }
+      }
+    },
+    "Command Policy" : {
+      "comment" : "Title of the per-server command allow and deny editor.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コマンドポリシー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "命令策略"
+          }
+        }
+      }
+    },
+    "Could not save the command policy." : {
+      "comment" : "Shown when saving the command policy fails.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コマンドポリシーを保存できませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法保存命令策略。"
+          }
+        }
+      }
+    },
+    "Delete Host Key" : {
+      "comment" : "Button and alert title for deleting a known host key.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵を削除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除主机密钥"
+          }
+        }
+      }
+    },
+    "Deny List" : {
+      "comment" : "The list of commands the user denies on a server.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒否リスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒绝列表"
+          }
+        }
+      }
+    },
+    "Deny rules override allow rules and always-allow rules. Forbidden commands cannot be added to the allow list." : {
+      "comment" : "Explains command policy precedence.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒否ルールは許可ルールと「常に許可」より優先されます。禁止コマンドは許可リストに追加できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拒绝规则优先于允许规则和「始终允许」。禁止类命令不能加入允许列表。"
+          }
+        }
+      }
+    },
+    "Enter a command." : {
+      "comment" : "Validation when the command field is empty.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コマンドを入力してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请输入命令。"
+          }
+        }
+      }
+    },
+    "Hex Digest" : {
+      "comment" : "Label for the raw SHA-256 hex of a host key.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16進ダイジェスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "十六进制摘要"
+          }
+        }
+      }
+    },
+    "Host Key Changed" : {
+      "comment" : "Title when a server presents a different host key.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵が変わりました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机密钥已变化"
+          }
+        }
+      }
+    },
+    "Host Keys" : {
+      "comment" : "Section and screen title for known SSH host keys.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机密钥"
+          }
+        }
+      }
+    },
+    "Host key state changed during confirmation" : {
+      "comment" : "Error when the stored host key changes while the user is confirming it.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認中にホスト鍵の状態が変わりました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认期间主机密钥状态发生了变化"
+          }
+        }
+      }
+    },
+    "Known host keys are stored on this device. Deleting one makes the next connection ask you to verify the fingerprint again." : {
+      "comment" : "Footnote on the known host keys screen.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "既知のホスト鍵はこのデバイスに保存されます。削除すると、次回の接続でフィンガープリントの確認が再度求められます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已知主机密钥保存在这台设备上。删除后，下次连接会再次要求你核对指纹。"
+          }
+        }
+      }
+    },
+    "Manage Host Keys" : {
+      "comment" : "Settings link to the known host key list.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵を管理"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理主机密钥"
+          }
+        }
+      }
+    },
+    "Manage allow and deny lists, and review always-allowed actions for this server." : {
+      "comment" : "Subtitle for the command policy entry on the server screen.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーの許可/拒否リストを管理し、常に許可した操作を確認します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理这台服务器的允许/拒绝列表，并查看始终允许的操作。"
+          }
+        }
+      }
+    },
+    "New fingerprint" : {
+      "comment" : "Label for the host key fingerprint just received.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しいフィンガープリント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新指纹"
+          }
+        }
+      }
+    },
+    "No Host Keys" : {
+      "comment" : "Empty state for the known host key list.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵はありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有主机密钥"
+          }
+        }
+      }
+    },
+    "No commands in this list." : {
+      "comment" : "Empty state for an allow or deny list.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このリストにコマンドはありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此列表中没有命令。"
+          }
+        }
+      }
+    },
+    "Remove the trusted key for %@? The next connection will ask you to verify the fingerprint again." : {
+      "comment" : "Confirmation before deleting a known host key. The argument is host:port.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ の信頼済み鍵を削除しますか？次回の接続でフィンガープリントの確認が再度求められます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要移除 %1$@ 的已信任密钥吗？下次连接会再次要求你核对指纹。"
+          }
+        }
+      }
+    },
+    "Reset Stored Key & Reconnect" : {
+      "comment" : "Button that forgets a mismatched host key and connects again so the new fingerprint can be confirmed.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みの鍵をリセットして再接続"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置已存密钥并重连"
+          }
+        }
+      }
+    },
+    "SHA256 Fingerprint" : {
+      "comment" : "Label for an OpenSSH-style SHA256 host key fingerprint.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SHA256 フィンガープリント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SHA256 指纹"
+          }
+        }
+      }
+    },
+    "Stored fingerprint" : {
+      "comment" : "Label for the previously trusted host key fingerprint.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みのフィンガープリント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存的指纹"
+          }
+        }
+      }
+    },
+    "That command is already in the list." : {
+      "comment" : "Validation when a command entry is duplicated.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "そのコマンドは既にリストにあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这条命令已经在列表中。"
+          }
+        }
+      }
+    },
+    "The host key changed. This can happen after a server reinstall, or it can mean someone is intercepting the connection. Compare both fingerprints before trusting the new key." : {
+      "comment" : "Explanation shown when an SSH host key changes.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵が変わりました。サーバーを再インストールしたか、接続が傍受されている可能性があります。新しい鍵を信頼する前に、両方のフィンガープリントを比較してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机密钥变了。这可能是服务器重装，也可能是有人在窃听连接。信任新密钥前请对照两枚指纹。"
+          }
+        }
+      }
+    },
+    "The host key for %@ needs confirmation before it can be trusted. Fingerprint: %@." : {
+      "comment" : "Error when a new host key cannot be confirmed. The first argument is the host. The second is the fingerprint.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ のホスト鍵は、信頼する前に確認が必要です。フィンガープリント：%2$@。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "必须先确认 %1$@ 的主机密钥才能信任。指纹：%2$@。"
+          }
+        }
+      }
+    },
+    "This command is forbidden and cannot be added to the allow list." : {
+      "comment" : "Validation when the user tries to allow a forbidden command.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このコマンドは禁止されているため、許可リストに追加できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这条命令被禁止，不能加入允许列表。"
+          }
+        }
+      }
+    },
+    "This is the first connection to this server. Trust it only if the SHA256 fingerprint matches a value you received from a trusted source." : {
+      "comment" : "Explanation shown the first time an SSH host key is seen.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーへの初回接続です。SHA256 フィンガープリントが信頼できる入手元の値と一致する場合だけ信頼してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是第一次连接这台服务器。只有当 SHA256 指纹与你从可信来源拿到的值一致时再信任它。"
+          }
+        }
+      }
+    },
+    "Trust New Key" : {
+      "comment" : "Button that trusts a changed SSH host key.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しい鍵を信頼"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信任新密钥"
+          }
+        }
+      }
+    },
+    "Trust This Key" : {
+      "comment" : "Button that trusts an SSH host key on first connection.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この鍵を信頼"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信任此密钥"
+          }
+        }
+      }
+    },
+    "Verify Host Key" : {
+      "comment" : "Title of the first-connection host key confirmation.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵を確認"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证主机密钥"
+          }
+        }
+      }
+    },
+    "You did not trust the host key for %@. Fingerprint: %@." : {
+      "comment" : "Shown when the user rejects a host key on first connection.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ のホスト鍵を信頼しませんでした。フィンガープリント：%2$@。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你没有信任 %1$@ 的主机密钥。指纹：%2$@。"
+          }
+        }
+      }
+    },
+    "You did not trust the new host key for %@. Stored fingerprint %@, received %@." : {
+      "comment" : "Shown when the user rejects a changed host key.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ の新しいホスト鍵を信頼しませんでした。保存済みのフィンガープリントは %2$@、受信したフィンガープリントは %3$@ です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你没有信任 %1$@ 的新主机密钥。已保存的指纹 %2$@，收到的指纹 %3$@。"
+          }
+        }
+      }
+    },
     "Trusted Actions" : {
       "comment" : "The title of a screen listing always-allowed command and path rules for a server.",
       "localizations" : {
@@ -4735,6 +5330,134 @@
             "value" : "最大上下文：该模型的上下文窗口为 %@ token。更大的设置值会被自动封顶，为回复预留空间。"
           }
         }
+      }
+    },
+    "Are you sure you want to delete \"%@\"? This action cannot be undone." : {
+    },
+    "A runbook needs at least one user request." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックには少なくとも1件のユーザー依頼が必要です。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作手册至少需要一条用户请求。" } }
+      }
+    },
+    "Could not connect to %@." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ に接続できませんでした。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法连接到 %@。" } }
+      }
+    },
+    "Could not find a server named %@." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ という名前のサーバーが見つかりません。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到名为 %@ 的服务器。" } }
+      }
+    },
+    "Could not find that runbook." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "そのランブックは見つかりません。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到该操作手册。" } }
+      }
+    },
+    "Enter a name" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "名前を入力" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入名称" } }
+      }
+    },
+    "No runbooks yet" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックはまだありません" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有操作手册" } }
+      }
+    },
+    "Opening ConchTalk to run the runbook." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックを実行するために ConchTalk を開いています。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在打开 ConchTalk 以运行操作手册。" } }
+      }
+    },
+    "Run" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "実行" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "运行" } }
+      }
+    },
+    "Run a saved runbook on one of your servers." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存したランブックをサーバーの一台で実行します。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在你的一台服务器上运行已保存的操作手册。" } }
+      }
+    },
+    "Run on this server" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "このサーバーで実行" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在此服务器上运行" } }
+      }
+    },
+    "Run Runbook" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックを実行" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "运行操作手册" } }
+      }
+    },
+    "Runbook" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブック" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作手册" } }
+      }
+    },
+    "Runbook name" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブック名" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "手册名称" } }
+      }
+    },
+    "Runbooks" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブック" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作手册" } }
+      }
+    },
+    "Save a finished conversation, then run it again on any server." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "完了した会話を保存し、どのサーバーでも再実行できます。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "把已完成的对话保存下来，之后可在任意服务器上再次运行。" } }
+      }
+    },
+    "Save as Runbook" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックとして保存" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存为操作手册" } }
+      }
+    },
+    "Saved runbooks become skills the assistant can activate." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "保存したランブックは、アシスタントが呼び出せる Skill になります。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存后的操作手册会成为助手可激活的 Skill。" } }
+      }
+    },
+    "Server name" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "サーバー名" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器名称" } }
+      }
+    },
+    "Several servers match %@. Use the full name." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ に一致するサーバーが複数あります。完全な名前を指定してください。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有多台服务器匹配 %@。请使用完整名称。" } }
+      }
+    },
+    "Started %@ on %@." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%2$@ で %1$@ を開始しました。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已在 %2$@ 上开始 %1$@。" } }
+      }
+    },
+    "This conversation cannot be saved yet. Wait until the assistant finishes successfully." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "この会話はまだ保存できません。アシスタントが正常に終了するまで待ってください。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这次对话还不能保存。请等助手成功完成后再试。" } }
       }
     },
     "%d servers" : {

@@ -10,8 +10,13 @@ struct ServerListView: View {
     let keychainService: any KeychainServiceProtocol
     let onSelectServer: (Server) -> Void
     var onDisconnect: ((UUID) -> Void)?
+    var runbookCatalog: RunbookCatalog?
+    /// 在选定服务器上运行手册提示词（由外层负责连接并发送）。
+    var onRunRunbook: ((Server, String) -> Void)?
     /// 对一个分组里的全部服务器跑同一条提示词。
     var runBatch: ((ServerGroup, [Server], String) async -> ServerBatchReport)?
+    @State private var showRunbooks = false
+    @State private var runbookModel: RunbookListModel?
     @State private var batchTarget: BatchTarget?
 
     var body: some View {
@@ -90,6 +95,19 @@ struct ServerListView: View {
             Task { await viewModel.search() }
         }
         .toolbar {
+            if runbookCatalog != nil {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        if runbookModel == nil, let runbookCatalog {
+                            runbookModel = RunbookListModel(catalog: runbookCatalog)
+                        }
+                        showRunbooks = true
+                    } label: {
+                        Image(systemName: "text.book.closed")
+                    }
+                    .accessibilityLabel(String(localized: "Runbooks", bundle: LanguageSettings.currentBundle))
+                }
+            }
             ToolbarItem(placement: .automatic) {
                 Menu {
                     Button {
@@ -135,9 +153,23 @@ struct ServerListView: View {
                 Task { await viewModel.updateServer(updated, password: password, groupID: groupID) }
             }
         }
+        .sheet(isPresented: $showRunbooks) {
+            if let runbookModel {
+                RunbookListView(
+                    model: runbookModel,
+                    servers: viewModel.groupedServers.flatMap(\.servers),
+                    onRun: { server, prompt in
+                        onRunRunbook?(server, prompt)
+                    }
+                )
+            }
+        }
         .task {
             await viewModel.loadServers()
             sshKeys = (try? await viewModel.fetchSSHKeys()) ?? []
+            if runbookModel == nil, let runbookCatalog {
+                runbookModel = RunbookListModel(catalog: runbookCatalog)
+            }
         }
         .onChange(of: viewModel.showAddServer) {
             if viewModel.showAddServer {
