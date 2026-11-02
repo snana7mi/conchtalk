@@ -81,7 +81,7 @@ struct CommandDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
-        case "read_file", "write_file":
+        case "read_file", "write_file", "edit_file", "rollback_file":
             if let path = args?["path"] as? String {
                 Label(path, systemImage: toolCall.toolName.contains("write") ? "doc.text.fill" : "doc.text")
                     .font(Theme.commandFont)
