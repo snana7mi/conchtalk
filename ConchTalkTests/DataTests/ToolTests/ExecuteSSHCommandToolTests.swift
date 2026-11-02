@@ -160,6 +160,51 @@ struct ExecuteSSHCommandToolTests {
             #expect(result.isSuccess == true)
             #expect(result.output == "file1\nfile2\n")
             #expect(mockClient.executedCommands == ["ls"])
+            #expect(mockClient.callHistory.last?.arguments["reclaimOnTimeout"] == "true")
+            #expect(Double(mockClient.callHistory.last?.arguments["timeout"] ?? "") == 30)
+        }
+
+        @Test("timeout 被夹到 1...600 秒")
+        func timeoutIsClamped() async throws {
+            let sut = ExecuteSSHCommandTool()
+            let high = MockSSHClient()
+            _ = try await sut.execute(
+                arguments: ["command": "sleep 1", "is_destructive": false, "explanation": "test", "timeout": 5_000],
+                sshClient: high
+            )
+            #expect(Double(high.callHistory.last?.arguments["timeout"] ?? "") == 600)
+
+            let low = MockSSHClient()
+            _ = try await sut.execute(
+                arguments: ["command": "sleep 1", "is_destructive": false, "explanation": "test", "timeout": 0],
+                sshClient: low
+            )
+            #expect(Double(low.callHistory.last?.arguments["timeout"] ?? "") == 1)
+        }
+
+        @Test("background 用 nohup 启动并立刻返回日志路径")
+        func backgroundLaunch() async throws {
+            let sut = ExecuteSSHCommandTool()
+            let mockClient = MockSSHClient()
+            mockClient.executeResult = "pid=42\nlog=/tmp/conchtalk-bg/x.log"
+
+            let result = try await sut.execute(
+                arguments: ["command": "echo hi", "is_destructive": false, "explanation": "test", "background": true],
+                sshClient: mockClient
+            )
+
+            #expect(result.output.contains("log_path:"))
+            #expect(result.output.contains("/tmp/conchtalk-bg/"))
+            #expect(mockClient.executedCommands.first?.contains("nohup") == true)
+            #expect(mockClient.executedCommands.first?.contains("setsid") == true)
+            #expect(mockClient.callHistory.last?.arguments["reclaimOnTimeout"] == "false")
+        }
+
+        @Test("后台执行只读命令也要确认，禁止命令仍然禁止")
+        func backgroundSafety() {
+            let sut = ExecuteSSHCommandTool()
+            #expect(sut.validateSafety(arguments: ["command": "ls", "is_destructive": false, "background": true]) == .needsConfirmation)
+            #expect(sut.validateSafety(arguments: ["command": "rm -rf /", "is_destructive": true, "background": true]) == .forbidden)
         }
 
         @Test("Missing command parameter throws ToolError")
@@ -303,6 +348,151 @@ struct ExecuteSSHCommandToolTests {
         @Test("2>&1 维持 needsConfirmation（& 分段所致，pre-existing 行为）")
         func fdDupNeedsConfirmation() {
             #expect(sut.validateSafety(arguments: args(command: "ps aux 2>&1")) == .needsConfirmation)
+        }
+    }
+
+    // MARK: - 包装器 / 子命令 / rm 边界
+
+    @Suite("Wrapper and subcommand classification")
+    struct WrapperAndSubcommandTests {
+        private let sut = ExecuteSSHCommandTool()
+
+        private func args(command: String, isDestructive: Bool = false) -> [String: Any] {
+            ["command": command, "is_destructive": isDestructive, "explanation": "test"]
+        }
+
+        @Test("包装器不因首词在白名单而自动放行", arguments: [
+            "env ls",
+            "env rm -rf /tmp/build",
+            "env sh -c 'ls'",
+            "env sh -c 'rm -rf /tmp/build'",
+            "sudo ls",
+            "nohup ls",
+            "xargs ls",
+            "timeout 5 ls",
+            "nice ls",
+            "time ls",
+            "command ls",
+            "exec ls",
+            "sh -c 'ls'",
+            "bash -c 'rm -rf /tmp/build'",
+        ])
+        func wrapperNeedsConfirmation(command: String) {
+            #expect(sut.validateSafety(arguments: args(command: command)) == .needsConfirmation, "应需要确认: \(command)")
+        }
+
+        @Test("没有子命令的 env 保持 safe")
+        func bareEnvIsSafe() {
+            #expect(sut.validateSafety(arguments: args(command: "env")) == .safe)
+            #expect(sut.validateSafety(arguments: args(command: "env FOO=bar")) == .safe)
+        }
+
+        @Test("白名单命令的破坏性形式需要确认", arguments: [
+            "find . -delete",
+            "find . -execdir rm {} +",
+            "find . -ok echo {} \\;",
+            "find . -fprint out.txt",
+            "find . -fprintf out.txt '%p'",
+            "find . -fls listing",
+            "ip link set eth0 up",
+            "ip addr flush dev eth0",
+            "ip addr add 10.0.0.2/24 dev eth0",
+            "ip addr del 10.0.0.2/24 dev eth0",
+            "ip route add default via 10.0.0.1",
+            "ip route del default",
+            "hostname web-1",
+            "date -s 2020-01-01",
+            "date --set 2020-01-01",
+            "git branch -d feature",
+            "git branch -D feature",
+            "git diff --output out.patch",
+            "git diff --output=out.patch",
+            "rm -rf /tmp/build",
+            "rm -rf /usr/bin",
+            "rm -rf ~/work",
+        ])
+        func destructiveFormNeedsConfirmation(command: String) {
+            #expect(sut.validateSafety(arguments: args(command: command)) == .needsConfirmation, "应需要确认: \(command)")
+        }
+
+        @Test("只读形式保持 safe", arguments: [
+            "ls -la /tmp",
+            "find . -name foo",
+            "ip addr show",
+            "ip link",
+            "ip route get 8.8.8.8",
+            "hostname",
+            "hostname -I",
+            "date",
+            "date +%s",
+            "git status -sb",
+            "git branch -vv",
+            "git diff HEAD",
+            "echo rm -rf /tmp/build",
+        ])
+        func readOnlyStaysSafe(command: String) {
+            #expect(sut.validateSafety(arguments: args(command: command)) == .safe, "应自动放行: \(command)")
+        }
+
+        @Test("is_destructive 不能把 rm -rf /tmp/build 降成 safe")
+        func destructiveFlagCannotClearRm() {
+            #expect(sut.validateSafety(arguments: args(command: "rm -rf /tmp/build", isDestructive: false)) == .needsConfirmation)
+        }
+
+        @Test("is_destructive 可以把只读命令升为需要确认")
+        func destructiveFlagRaisesReadOnly() {
+            #expect(sut.validateSafety(arguments: args(command: "ls", isDestructive: true)) == .needsConfirmation)
+        }
+    }
+
+    @Suite("rm and mkfs boundaries")
+    struct RmAndMkfsBoundaryTests {
+        private let sut = ExecuteSSHCommandTool()
+
+        private func args(command: String) -> [String: Any] {
+            ["command": command, "is_destructive": false, "explanation": "test"]
+        }
+
+        @Test("递归删除受保护路径 forbidden", arguments: [
+            "rm -rf /",
+            "rm -fr /",
+            "rm -rf /*",
+            "rm -rf ~",
+            "rm -rf ~/",
+            "rm -rf $HOME",
+            "rm -rf ${HOME}",
+            "rm -r -f /",
+            "rm --recursive --force /",
+            "sudo rm -rf /*",
+            "env rm -rf ~",
+            "bash -c 'rm -rf /'",
+            "rm -rf /usr",
+            "rm -rf /tmp",
+            "rm -rf /bin/*",
+        ])
+        func protectedRmIsForbidden(command: String) {
+            #expect(sut.validateSafety(arguments: args(command: command)) == .forbidden, "应禁止: \(command)")
+        }
+
+        @Test("子路径和非递归删除不 forbidden", arguments: [
+            "rm -rf /tmp/build",
+            "rm -rf ./build",
+            "rm -rf /usr/local",
+            "rm -f /tmp/build/file",
+            "rm file.txt",
+        ])
+        func narrowRmNeedsConfirmation(command: String) {
+            #expect(sut.validateSafety(arguments: args(command: command)) == .needsConfirmation, "应需要确认: \(command)")
+        }
+
+        @Test("mkfs 词边界")
+        func mkfsWordBoundary() {
+            #expect(sut.validateSafety(arguments: args(command: "mkfs.ext4 /dev/sda1")) == .forbidden)
+            #expect(sut.validateSafety(arguments: args(command: "sudo mkfs /dev/sda")) == .forbidden)
+            #expect(sut.validateSafety(arguments: args(command: "echo mkfs")) == .forbidden)
+            #expect(sut.validateSafety(arguments: args(command: "echo notmkfs")) == .safe)
+            #expect(sut.validateSafety(arguments: args(command: "echo mkfilesystem")) == .safe)
+            #expect(sut.validateSafety(arguments: args(command: "grep mkfs /var/log/syslog")) == .forbidden)
         }
     }
 }

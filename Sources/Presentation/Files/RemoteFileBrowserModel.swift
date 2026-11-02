@@ -82,6 +82,6 @@ final class RemoteFileBrowserModel {
 }
 
 /// RemoteFileTransferError：读取超过聊天附件上限的远端文件。
-enum RemoteFileTransferError: Error, Equatable {
+nonisolated enum RemoteFileTransferError: Error, Equatable {
     case tooLarge(Int64)
 }

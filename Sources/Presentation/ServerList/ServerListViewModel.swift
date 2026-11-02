@@ -21,11 +21,17 @@ final class ServerListViewModel {
 
     private let store: SwiftDataStore
     private let keychainService: any KeychainServiceProtocol
+    private let knownHostsStore: KnownHostsStore
 
     /// 初始化视图模型，并注入所需业务依赖。
-    init(store: SwiftDataStore, keychainService: any KeychainServiceProtocol) {
+    init(
+        store: SwiftDataStore,
+        keychainService: any KeychainServiceProtocol,
+        knownHostsStore: KnownHostsStore = KnownHostsStore()
+    ) {
         self.store = store
         self.keychainService = keychainService
+        self.knownHostsStore = knownHostsStore
     }
 
     /// loadServers：加载并同步当前场景所需数据。
@@ -70,7 +76,7 @@ final class ServerListViewModel {
             // 先清理 Keychain 中可能存在的密码，避免残留
             try keychainService.deletePassword(forServer: server.id)
             // 清理该服务器的已知主机密钥指纹
-            await KnownHostsStore().remove(host: server.host, port: server.port)
+            await knownHostsStore.remove(host: server.host, port: server.port)
             try await store.deleteServer(server.id)
             servers.removeAll { $0.id == server.id }
             groupedServers = try await store.fetchServersGrouped()

@@ -26,10 +26,16 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
     var _isConnected: Bool = false
     var _serverCapabilities: ServerCapabilities = .unknown
     var sftpReadResult: Data = Data()
+    /// 按调用顺序返回不同内容。非空时优先于 `sftpReadResult`。
+    var sftpReadResults: [Data] = []
+    private var sftpReadIndex = 0
     var sftpReadError: Error?
+    var sftpReadPrefixError: Error?
     var sftpWriteError: Error?
     var sftpFileSizeResult: UInt64 = 0
     var sftpFileSizeError: Error?
+    /// 按调用顺序消耗。用完后回到 `sftpFileSizeError` / `sftpFileSizeResult`。
+    var sftpFileSizeSequence: [Result<UInt64, Error>] = []
     var sftpListResult: [RemoteFileEntry] = []
     var sftpListError: Error?
     var sftpWriteChunkedError: Error?
@@ -61,10 +67,14 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
         _isConnected = false
     }
 
-    func execute(command: String, timeout: TimeInterval) async throws -> String {
+    func execute(command: String, timeout: TimeInterval, reclaimOnTimeout: Bool) async throws -> String {
         callHistory.append(CallRecord(
             method: "execute",
-            arguments: ["command": command, "timeout": "\(timeout)"]
+            arguments: [
+                "command": command,
+                "timeout": "\(timeout)",
+                "reclaimOnTimeout": reclaimOnTimeout ? "true" : "false",
+            ]
         ))
         executedCommands.append(command)
         if let error = executeError {
@@ -112,6 +122,25 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
     func sftpReadFile(path: String) async throws -> Data {
         callHistory.append(CallRecord(method: "sftpReadFile", arguments: ["path": path]))
         if let error = sftpReadError { throw error }
+        return nextSFTPData()
+    }
+
+    func sftpReadPrefix(path: String, maxBytes: Int) async throws -> Data {
+        callHistory.append(CallRecord(
+            method: "sftpReadPrefix",
+            arguments: ["path": path, "maxBytes": "\(maxBytes)"]
+        ))
+        if let error = sftpReadPrefixError { throw error }
+        if maxBytes <= 0 { return Data() }
+        return Data(nextSFTPData().prefix(maxBytes))
+    }
+
+    private func nextSFTPData() -> Data {
+        if !sftpReadResults.isEmpty {
+            let result = sftpReadResults[min(sftpReadIndex, sftpReadResults.count - 1)]
+            sftpReadIndex += 1
+            return result
+        }
         return sftpReadResult
     }
 
@@ -122,6 +151,9 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
 
     func sftpFileSize(path: String) async throws -> UInt64 {
         callHistory.append(CallRecord(method: "sftpFileSize", arguments: ["path": path]))
+        if !sftpFileSizeSequence.isEmpty {
+            return try sftpFileSizeSequence.removeFirst().get()
+        }
         if let error = sftpFileSizeError { throw error }
         return sftpFileSizeResult
     }
@@ -150,6 +182,7 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
         callHistory = []
         executedCommands = []
         executeResultIndex = 0
+        sftpReadIndex = 0
         connectError = nil
         executeResult = ""
         executeResults = []
@@ -157,10 +190,13 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
         _isConnected = false
         _serverCapabilities = .unknown
         sftpReadResult = Data()
+        sftpReadResults = []
         sftpReadError = nil
+        sftpReadPrefixError = nil
         sftpWriteError = nil
         sftpFileSizeResult = 0
         sftpFileSizeError = nil
+        sftpFileSizeSequence = []
         sftpListResult = []
         sftpListError = nil
         sftpWriteChunkedError = nil

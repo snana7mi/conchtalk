@@ -9,4 +9,10 @@ nonisolated protocol ApprovalPolicyProviding: Sendable {
     func save(_ rule: ApprovalRule) async
     func trustForSession(serverID: UUID, matcher: ApprovalMatcher) async
     func clearSessionTrust(serverID: UUID) async
+    /// 该服务器的允许/拒绝命令词表。默认空表，调用方行为与未配置时一致。
+    func commandPolicy(for serverID: UUID) async -> ServerCommandPolicy
+}
+
+extension ApprovalPolicyProviding {
+    func commandPolicy(for serverID: UUID) async -> ServerCommandPolicy { .empty }
 }

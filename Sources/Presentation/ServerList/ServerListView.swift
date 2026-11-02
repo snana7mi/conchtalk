@@ -10,6 +10,14 @@ struct ServerListView: View {
     let keychainService: any KeychainServiceProtocol
     let onSelectServer: (Server) -> Void
     var onDisconnect: ((UUID) -> Void)?
+    var runbookCatalog: RunbookCatalog?
+    /// 在选定服务器上运行手册提示词（由外层负责连接并发送）。
+    var onRunRunbook: ((Server, String) -> Void)?
+    /// 对一个分组里的全部服务器跑同一条提示词。
+    var runBatch: ((ServerGroup, [Server], String) async -> ServerBatchReport)?
+    @State private var showRunbooks = false
+    @State private var runbookModel: RunbookListModel?
+    @State private var batchTarget: BatchTarget?
 
     var body: some View {
         List {
@@ -35,6 +43,16 @@ struct ServerListView: View {
             } else {
                 ForEach(Array(viewModel.groupedServers.enumerated()), id: \.offset) { _, entry in
                     Section(entry.group?.name ?? String(localized: "Ungrouped", bundle: LanguageSettings.currentBundle)) {
+                        if let group = entry.group, runBatch != nil {
+                            Button {
+                                batchTarget = BatchTarget(group: group, servers: entry.servers)
+                            } label: {
+                                Label(
+                                    String(localized: "Run on group", bundle: LanguageSettings.currentBundle),
+                                    systemImage: "square.stack.3d.up"
+                                )
+                            }
+                        }
                         ForEach(entry.servers) { server in
                             let isSSHConnected = sshManager.activeConnectionIDs.contains(server.id)
                             Button {
@@ -77,6 +95,19 @@ struct ServerListView: View {
             Task { await viewModel.search() }
         }
         .toolbar {
+            if runbookCatalog != nil {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        if runbookModel == nil, let runbookCatalog {
+                            runbookModel = RunbookListModel(catalog: runbookCatalog)
+                        }
+                        showRunbooks = true
+                    } label: {
+                        Image(systemName: "text.book.closed")
+                    }
+                    .accessibilityLabel(String(localized: "Runbooks", bundle: LanguageSettings.currentBundle))
+                }
+            }
             ToolbarItem(placement: .automatic) {
                 Menu {
                     Button {
@@ -106,14 +137,39 @@ struct ServerListView: View {
                 onDelete: { id in await viewModel.deleteGroup(id) }
             )
         }
+        .sheet(item: $batchTarget) { target in
+            ServerBatchSheet(
+                groupName: target.group.name,
+                serverCount: target.servers.count
+            ) { prompt in
+                if let runBatch {
+                    return await runBatch(target.group, target.servers, prompt)
+                }
+                return ServerBatchReportBuilder.make(groupName: target.group.name, prompt: prompt, results: [])
+            }
+        }
         .sheet(item: $editingServer) { server in
             AddServerView(editing: server, groups: viewModel.groups, availableKeys: sshKeys, keychainService: keychainService) { updated, password, groupID in
                 Task { await viewModel.updateServer(updated, password: password, groupID: groupID) }
             }
         }
+        .sheet(isPresented: $showRunbooks) {
+            if let runbookModel {
+                RunbookListView(
+                    model: runbookModel,
+                    servers: viewModel.groupedServers.flatMap(\.servers),
+                    onRun: { server, prompt in
+                        onRunRunbook?(server, prompt)
+                    }
+                )
+            }
+        }
         .task {
             await viewModel.loadServers()
             sshKeys = (try? await viewModel.fetchSSHKeys()) ?? []
+            if runbookModel == nil, let runbookCatalog {
+                runbookModel = RunbookListModel(catalog: runbookCatalog)
+            }
         }
         .onChange(of: viewModel.showAddServer) {
             if viewModel.showAddServer {
@@ -126,6 +182,13 @@ struct ServerListView: View {
             }
         }
     }
+}
+
+/// BatchTarget：一次分组批处理要带进 Sheet 的分组和服务器。
+private struct BatchTarget: Identifiable {
+    let group: ServerGroup
+    let servers: [Server]
+    var id: UUID { group.id }
 }
 
 /// ServerRowView：负责界面渲染与用户交互响应。
