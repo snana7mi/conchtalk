@@ -39,24 +39,12 @@ nonisolated struct ExecuteSSHCommandTool: ToolProtocol, @unchecked Sendable {
     /// 评估命令风险级别并决定是否需要确认。
     /// - Parameter arguments: 工具入参，至少包含 `command` 与 `is_destructive`。
     /// - Returns: 命令安全级别（safe / needsConfirmation / forbidden）。
-    /// - Note: 不信任 AI 自报的 `is_destructive`，通过 CommandHardening 共享谓词
-    ///   独立检测重定向和 `-exec` 等危险模式做兜底。
+    /// - Note: 不信任 AI 自报的 `is_destructive`。分级交给 CommandHardening：
+    ///   包装器与破坏性子命令/标志不会因为首词在白名单里就自动放行。
     func validateSafety(arguments: [String: Any]) -> SafetyLevel {
-        let cmd = (arguments["command"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = arguments["command"] as? String ?? ""
         let isDestructive = arguments["is_destructive"] as? Bool ?? true
-
-        if CommandHardening.isForbidden(cmd) { return .forbidden }
-
-        let rawSegments = CommandHardening.splitRawSegments(cmd)
-        let allSegmentsSafe = !rawSegments.isEmpty && rawSegments.allSatisfy { segment in
-            let firstToken = CommandHardening.tokenize(segment).first ?? segment
-            return CommandHardening.matchesSafeCommand(segment) || CommandHardening.safeCommands.contains(firstToken)
-        }
-        if allSegmentsSafe {
-            if CommandHardening.hasInjectionOrRedirection(cmd) { return .needsConfirmation }
-            if !isDestructive { return .safe }
-        }
-        return .needsConfirmation
+        return CommandHardening.classifyCommand(command, isDestructive: isDestructive)
     }
 
     var supportsStreaming: Bool { false }
