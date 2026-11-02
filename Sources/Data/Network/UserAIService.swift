@@ -8,7 +8,7 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
     private let session: URLSession
     private let keychainService: KeychainServiceProtocol
     private let toolRegistry: ToolRegistryProtocol
-    private let skillRegistry: SkillRegistry
+    private let skillRegistry: any SkillLookingUp
     /// App 内置的可信角色说明，仅供受限 subagent 使用。
     private let trustedInstructions: String?
     private let streamingExecutor: StreamingExecutor
@@ -22,7 +22,7 @@ nonisolated final class UserAIService: AIServiceProtocol, @unchecked Sendable {
     init(
         keychainService: KeychainServiceProtocol,
         toolRegistry: ToolRegistryProtocol,
-        skillRegistry: SkillRegistry,
+        skillRegistry: any SkillLookingUp,
         trustedInstructions: String? = nil
     ) {
         let config = URLSessionConfiguration.default

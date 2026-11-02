@@ -99,8 +99,10 @@ nonisolated final class SkillRegistry: Sendable {
         return try? String(contentsOf: fileURL, encoding: .utf8)
     }
 
-    /// 返回所有可用 skill 的名称列表（用于错误提���）。
+    /// 返回所有可用 skill 的名称列表（用于错误提示）。
     var availableSkillNames: [String] {
         skills.map { $0.name }
     }
 }
+
+extension SkillRegistry: SkillLookingUp {}
