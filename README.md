@@ -63,6 +63,7 @@ None of these flows passes through a ConchTalk account, gateway, relay, or cloud
 - Connect to servers using password or SSH key authentication
 - Execute AI-planned multi-step tasks with tool calls
 - Dispatch parallel subagents for specialized, context-isolated subtasks
+- Run the same task on every server in a group. Work is parallel under the same concurrency limit as subagents, each server still asks for its own approval, and the result is a per-server comparison
 - Read, write, edit, search, and upload files on remote systems
 - Search the live web through Brave, Exa, AnySearch, or Tavily with your own provider API key
 - Fetch web content through the remote machine's network (public targets only — non-public addresses are refused to prevent SSRF)

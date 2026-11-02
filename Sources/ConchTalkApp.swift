@@ -107,6 +107,9 @@ struct ConchTalkApp: App {
                                     await container.sshManager.disconnect(from: serverID)
                                     container.removeChatViewModel(for: serverID)
                                 }
+                            },
+                            runBatch: { group, servers, prompt in
+                                await runServerBatch(container: container, group: group, servers: servers, prompt: prompt)
                             }
                         )
                         .navigationDestination(item: $selectedServer) { server in
@@ -333,6 +336,32 @@ struct ConchTalkApp: App {
         }
 
         container.taskExecutionCoordinator.liveActivity.updateServers(snapshots, force: true)
+    }
+
+    // MARK: - 分组批处理
+
+    /// 同一提示词在分组内并行执行。并发上限与 subagent 相同，审批仍按服务器分开。
+    private func runServerBatch(
+        container: DependencyContainer,
+        group: ServerGroup,
+        servers: [Server],
+        prompt: String
+    ) async -> ServerBatchReport {
+        let executor = LiveServerBatchExecutor(
+            sshManager: container.sshManager,
+            keychain: container.keychainService,
+            coordinator: container.taskExecutionCoordinator,
+            messages: ChatMessageRepository(store: container.store),
+            onUserMessage: { server, message in
+                container.cachedChatViewModel(for: server.id)?.messages.append(message)
+            }
+        )
+        return await ServerBatchRunner().run(
+            groupName: group.name,
+            servers: servers,
+            prompt: prompt,
+            executor: executor
+        )
     }
 
     // MARK: - SSH 连接导航

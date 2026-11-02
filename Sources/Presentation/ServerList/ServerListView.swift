@@ -10,6 +10,9 @@ struct ServerListView: View {
     let keychainService: any KeychainServiceProtocol
     let onSelectServer: (Server) -> Void
     var onDisconnect: ((UUID) -> Void)?
+    /// 对一个分组里的全部服务器跑同一条提示词。
+    var runBatch: ((ServerGroup, [Server], String) async -> ServerBatchReport)?
+    @State private var batchTarget: BatchTarget?
 
     var body: some View {
         List {
@@ -35,6 +38,16 @@ struct ServerListView: View {
             } else {
                 ForEach(Array(viewModel.groupedServers.enumerated()), id: \.offset) { _, entry in
                     Section(entry.group?.name ?? String(localized: "Ungrouped", bundle: LanguageSettings.currentBundle)) {
+                        if let group = entry.group, runBatch != nil {
+                            Button {
+                                batchTarget = BatchTarget(group: group, servers: entry.servers)
+                            } label: {
+                                Label(
+                                    String(localized: "Run on group", bundle: LanguageSettings.currentBundle),
+                                    systemImage: "square.stack.3d.up"
+                                )
+                            }
+                        }
                         ForEach(entry.servers) { server in
                             let isSSHConnected = sshManager.activeConnectionIDs.contains(server.id)
                             Button {
@@ -106,6 +119,17 @@ struct ServerListView: View {
                 onDelete: { id in await viewModel.deleteGroup(id) }
             )
         }
+        .sheet(item: $batchTarget) { target in
+            ServerBatchSheet(
+                groupName: target.group.name,
+                serverCount: target.servers.count
+            ) { prompt in
+                if let runBatch {
+                    return await runBatch(target.group, target.servers, prompt)
+                }
+                return ServerBatchReportBuilder.make(groupName: target.group.name, prompt: prompt, results: [])
+            }
+        }
         .sheet(item: $editingServer) { server in
             AddServerView(editing: server, groups: viewModel.groups, availableKeys: sshKeys, keychainService: keychainService) { updated, password, groupID in
                 Task { await viewModel.updateServer(updated, password: password, groupID: groupID) }
@@ -126,6 +150,13 @@ struct ServerListView: View {
             }
         }
     }
+}
+
+/// BatchTarget：一次分组批处理要带进 Sheet 的分组和服务器。
+private struct BatchTarget: Identifiable {
+    let group: ServerGroup
+    let servers: [Server]
+    var id: UUID { group.id }
 }
 
 /// ServerRowView：负责界面渲染与用户交互响应。

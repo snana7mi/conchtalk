@@ -58,6 +58,9 @@ final class TaskExecutionCoordinator {
     /// App 是否在前台。
     var isAppInForeground: Bool = true
 
+    /// 批处理等待单台任务结束。键是用户消息 ID，与 enqueue 的 taskID 相同。
+    private var promptWaiters: [UUID: CheckedContinuation<ServerPromptOutcome, Never>] = [:]
+
     /// 有活跃任务的服务器 ID（委托给 lifecycleManager）。
     var activeTaskServerIDs: Set<UUID> {
         lifecycleManager.activeTaskServerIDs
@@ -136,6 +139,31 @@ final class TaskExecutionCoordinator {
         taskQueue.enqueue(queued)
         if !lifecycleManager.hasActiveTask(for: serverID) {
             dequeueAndExecuteNext(serverID: serverID, messages: messages, server: server)
+        }
+    }
+
+    /// 在一台服务器上跑一条提示词并等待结束。
+    /// 确认仍进入 `handleToolCallConfirmation(serverID:)`，按服务器分槽，不会把批准复制到其他服务器。
+    func runPrompt(
+        server: Server,
+        prompt: String,
+        history: [Message],
+        onUserMessage: ((Message) -> Void)? = nil
+    ) async -> ServerPromptOutcome {
+        let user = Message(role: .user, content: prompt)
+        onUserMessage?(user)
+        var messages = history.filter { !$0.isLoading && $0.id != user.id }
+        messages.append(user)
+        try? await messageRepository.appendMessage(user, toServer: server.id)
+        return await withCheckedContinuation { continuation in
+            promptWaiters[user.id] = continuation
+            enqueueTask(
+                taskID: user.id,
+                serverID: server.id,
+                text: prompt,
+                server: server,
+                messages: messages
+            )
         }
     }
 
@@ -268,7 +296,11 @@ final class TaskExecutionCoordinator {
                 attachments: next.attachments
             )
         } catch {
-            // 启动失败（如 alreadyRunning），跳过并尝试下一条
+            // 启动失败（如 alreadyRunning），跳过并尝试下一条。批处理等待者不能因此挂起。
+            resumePromptWaiter(
+                next.id,
+                outcome: .failure("Could not start the task.")
+            )
             dequeueAndExecuteNext(serverID: serverID, messages: messages, server: server)
         }
     }
@@ -344,14 +376,18 @@ final class TaskExecutionCoordinator {
         server: Server,
         attachments: [FileAttachment] = []
     ) async {
+        var outcome = ServerPromptOutcome.failure("The task did not finish.")
         defer {
+            resumePromptWaiter(taskID, outcome: outcome)
             cleanupTask(serverID: serverID)
         }
 
         // 获取 SSH 客户端
         guard let sshClient = contextFactory.getClient(for: serverID) else {
+            let message = SSHError.notConnected.localizedDescription
+            outcome = .failure(message)
             try? await messageRepository.appendSystemMessage(
-                String(localized: "Error: \(SSHError.notConnected.localizedDescription)",
+                String(localized: "Error: \(message)",
                        bundle: LanguageSettings.currentBundle),
                 type: .error,
                 toServer: serverID
@@ -411,7 +447,7 @@ final class TaskExecutionCoordinator {
             },
             approvalPolicyStore: contextFactory.approvalPolicyStore,
             approvalPreviewBuilder: contextFactory.approvalPreviewBuilder,
-            maxConcurrent: 2
+            maxConcurrent: BoundedParallelMap.defaultMaxConcurrent
         )
 
         // 绑定回调
@@ -429,10 +465,15 @@ final class TaskExecutionCoordinator {
                 serverContext: serverContext
             )
 
-            guard lifecycleManager.hasActiveTask(for: serverID) else { return }
+            guard lifecycleManager.hasActiveTask(for: serverID) else {
+                outcome = .failure("Cancelled")
+                return
+            }
 
             // 持久化结果消息
             try? await messageRepository.appendMessages(resultMessages, toServer: serverID)
+            let assistantText = resultMessages.last(where: { $0.role == .assistant })?.content ?? ""
+            outcome = ServerPromptOutcome(succeeded: true, assistantText: assistantText, errorSummary: nil)
 
             // 后处理
             if let bgTask = lifecycleManager.task(for: serverID) {
@@ -446,6 +487,7 @@ final class TaskExecutionCoordinator {
             }
         } catch is CancellationError {
             print("[TEC] Task cancelled for server \(serverID)")
+            outcome = .failure("Cancelled")
             guard lifecycleManager.hasActiveTask(for: serverID) else { return }
 
             // 保存部分消息
@@ -461,6 +503,7 @@ final class TaskExecutionCoordinator {
                 }
             }
         } catch {
+            outcome = .failure(error.localizedDescription)
             guard lifecycleManager.hasActiveTask(for: serverID) else { return }
             print("[TEC] Task error for server \(serverID): \(error)")
             try? await messageRepository.appendSystemMessage(
@@ -707,6 +750,12 @@ final class TaskExecutionCoordinator {
     }
 
     // MARK: - Internal: Cleanup
+
+    /// 结束批处理对这条任务的等待。没有等待者时什么都不做。
+    private func resumePromptWaiter(_ taskID: UUID, outcome: ServerPromptOutcome) {
+        guard let waiter = promptWaiters.removeValue(forKey: taskID) else { return }
+        waiter.resume(returning: outcome)
+    }
 
     private func cleanupTask(serverID: UUID) {
         cleanupContinuations(for: serverID)
