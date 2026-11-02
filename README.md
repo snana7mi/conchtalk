@@ -72,6 +72,7 @@ None of these flows passes through a ConchTalk account, gateway, relay, or cloud
 - Search the live web through Brave, Exa, AnySearch, or Tavily with your own provider API key
 - Fetch web content through the remote machine's network (public targets only — non-public addresses are refused to prevent SSRF)
 - Keep long-running work alive with Live Activity-powered background execution (iOS) and native background task fallback
+- Schedule health checks for disk, load, and optional service status. iOS background refresh decides the real time: not more often than about 15 minutes, one server per wake, and it can be delayed or skipped
 - Suggest switching into direct agent mode when a better remote agent is available
 - Persist server metadata, chat history, and memory for follow-up tasks
 - Show a live plan checklist for multi-step work (`update_plan`) and ask you a question with tappable answer choices when it needs a decision (`ask_user`)

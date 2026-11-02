@@ -94,6 +94,22 @@ final class NotificationService: NSObject, @unchecked Sendable {
         UNUserNotificationCenter.current().add(request)
     }
 
+    /// 发送健康检查越限通知。点击后沿用 serverID 深链。
+    func sendHealthAlert(serverName: String, serverID: UUID, message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = serverName
+        content.body = message
+        content.sound = .default
+        content.threadIdentifier = serverID.uuidString
+        content.userInfo = ["serverID": serverID.uuidString]
+        let request = UNNotificationRequest(
+            identifier: "health-\(serverID.uuidString)-\(UUID().uuidString.prefix(8))",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
     /// 发送 AI 回复通知（聊天风格：服务器名为发送者，头像在左侧）。
     func sendReplyNotification(
         serverName: String,
