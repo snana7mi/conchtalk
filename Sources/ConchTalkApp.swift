@@ -80,6 +80,7 @@ struct ConchTalkApp: App {
     /// 主界面（依赖容器就绪后展示）。
     @ViewBuilder
     private func mainContent(_ container: DependencyContainer) -> some View {
+        let hostKeyPrompt = container.hostKeyPromptCenter.pending
         ZStack {
             TabView(selection: Binding(
                 get: { selectedTab },
@@ -129,6 +130,7 @@ struct ConchTalkApp: App {
                         SettingsView(
                             selectedLanguage: $selectedLanguage,
                             sshKeyManagementViewModel: container.makeSSHKeyManagementViewModel(),
+                            knownHostsStore: container.knownHostsStore,
                             reportUnsavedChanges: $settingsHasUnsavedChanges,
                             triggerSave: $triggerSettingsSave
                         )
@@ -198,12 +200,12 @@ struct ConchTalkApp: App {
             )
         ) {
             if let server = hostKeyMismatchServer {
-                Button(String(localized: "Trust New Key & Reconnect", bundle: LanguageSettings.currentBundle)) {
+                Button(String(localized: "Reset Stored Key & Reconnect", bundle: LanguageSettings.currentBundle)) {
                     let s = server
                     hostKeyMismatchServer = nil
                     connectionState = .idle
                     Task {
-                        await KnownHostsStore().remove(host: s.host, port: s.port)
+                        await container.knownHostsStore.remove(host: s.host, port: s.port)
                         connectAndNavigate(to: s)
                     }
                 }
@@ -240,7 +242,7 @@ struct ConchTalkApp: App {
                     for server in expired {
                         // 清理 Keychain 密码和已知主机指纹
                         try? container.keychainService.deletePassword(forServer: server.id)
-                        await KnownHostsStore().remove(host: server.host, port: server.port)
+                        await container.knownHostsStore.remove(host: server.host, port: server.port)
                         try await container.store.deleteServer(server.id)
                         deletedNames.append(server.name)
                     }
@@ -314,6 +316,18 @@ struct ConchTalkApp: App {
             }
         }
         .animation(.easeInOut, value: expiredServerToast)
+        .sheet(item: Binding(
+            get: { hostKeyPrompt },
+            set: { newValue in
+                if newValue == nil {
+                    container.hostKeyPromptCenter.answer(.reject)
+                }
+            }
+        )) { prompt in
+            HostKeyConfirmationSheet(prompt: prompt) { decision in
+                container.hostKeyPromptCenter.answer(decision)
+            }
+        }
         .modelContainer(container.modelContainer)
     }
 
@@ -536,6 +550,7 @@ struct ConchTalkApp: App {
     private func cancelConnection() {
         let cancelledState = connectionState
         connectionGeneration &+= 1
+        container?.hostKeyPromptCenter.rejectAll()
         connectTask?.cancel()
         connectTask = nil
         connectionState = .idle

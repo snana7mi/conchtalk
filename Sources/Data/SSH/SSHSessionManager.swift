@@ -19,7 +19,14 @@ private struct LastConnectionParams {
 @Observable
 @MainActor
 final class SSHSessionManager {
+    private let knownHostsStore: KnownHostsStore
+    private let hostKeyPrompter: (any HostKeyPrompting)?
     private var clients: [UUID: NIOSSHClient] = [:]
+
+    init(knownHostsStore: KnownHostsStore = KnownHostsStore(), hostKeyPrompter: (any HostKeyPrompting)? = nil) {
+        self.knownHostsStore = knownHostsStore
+        self.hostKeyPrompter = hostKeyPrompter
+    }
 
     /// 每个服务器检测到的远端操作系统名称。
     private var detectedOS: [UUID: String] = [:]
@@ -120,7 +127,7 @@ final class SSHSessionManager {
             keyPassphrase = try keychainService.getKeyPassphrase(forKeyID: keyID)
         }
 
-        let client = NIOSSHClient()
+        let client = NIOSSHClient(knownHostsStore: knownHostsStore, hostKeyPrompter: hostKeyPrompter)
         await client.setServerID(server.id)
         await client.setOnDisconnected { [weak self] serverID in
             Task { @MainActor [weak self] in

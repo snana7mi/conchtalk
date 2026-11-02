@@ -15,9 +15,11 @@ nonisolated enum ToolRegistryFactory {
     ) -> [ToolProtocol] {
         [
             ExecuteSSHCommandTool(),
+            PollBackgroundCommandTool(),
             ReadFileTool(),
             WriteFileTool(),
             EditFileTool(),
+            RollbackFileTool(),
             GlobTool(),
             GrepTool(),
             UploadFileTool(),

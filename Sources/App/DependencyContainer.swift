@@ -31,8 +31,12 @@ final class DependencyContainer {
     let speechRecognitionService: SpeechRecognitionService
     let metricsPoller: ServerMetricsPoller
 
-    /// 授权策略存储（具体类型，供 Trusted Actions UI 读取/撤销规则）。
+    /// 授权策略存储（具体类型，供命令策略页读取/撤销规则）。
     let approvalPolicyStore: ApprovalPolicyStore
+    /// 进程内共享的已知主机存储，连接确认和管理页用同一份。
+    let knownHostsStore: KnownHostsStore
+    /// 握手期间弹出的主机密钥确认。
+    let hostKeyPromptCenter: HostKeyPromptCenter
 
     // MARK: - 新架构协调器
 
@@ -42,9 +46,9 @@ final class DependencyContainer {
     /// 异步工厂方法：将重量级 I/O（ModelContainer、Skill 文件加载）移到后台线程，
     /// 避免阻塞主线程导致首帧卡顿。
     static func create() async -> DependencyContainer {
-        // 提前创建 Application Support 目录，避免 CoreData 首次启动时的冗余错误日志
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        // 提前创建 Application Support 目录，避免 CoreData 首次启动时的冗余错误日志。
+        // 搜索路径为空时跳过，不强制解包。
+        ApplicationSupportDirectory.ensureExists()
 
         // ModelContainer 创建是主要瓶颈（SQLite 打开 + schema 迁移），移到后台线程
         let modelContainer = await Task.detached(priority: .userInitiated) {
@@ -100,7 +104,11 @@ final class DependencyContainer {
         self.store = SwiftDataStore(modelContainer: modelContainer)
 
         // Services（纯内存构造，无 I/O）
-        let sshMgr = SSHSessionManager()
+        let knownHostsStore = KnownHostsStore()
+        let hostKeyPromptCenter = HostKeyPromptCenter()
+        self.knownHostsStore = knownHostsStore
+        self.hostKeyPromptCenter = hostKeyPromptCenter
+        let sshMgr = SSHSessionManager(knownHostsStore: knownHostsStore, hostKeyPrompter: hostKeyPromptCenter)
         self.sshManager = sshMgr
 
         // Skill Registry（使用预加载数据，不再读磁盘）
@@ -243,7 +251,7 @@ final class DependencyContainer {
 
     /// makeServerListViewModel：构建服务器列表页面的视图模型实例。
     func makeServerListViewModel() -> ServerListViewModel {
-        ServerListViewModel(store: store, keychainService: keychainService)
+        ServerListViewModel(store: store, keychainService: keychainService, knownHostsStore: knownHostsStore)
     }
 
     /// makeSSHKeyManagementViewModel：构建 SSH 密钥管理页面的视图模型实例。

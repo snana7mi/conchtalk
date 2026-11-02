@@ -9,6 +9,20 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     /// 用例内系统提示文案的可注入本地化文本集合，避免 Domain 层依赖具体语言设置实现。
     struct LocalizedTexts: Sendable {
         let userRejectedCommand: String
+        let commandDeniedByPolicy: @Sendable (String) -> String
+
+        init(
+            userRejectedCommand: String,
+            commandDeniedByPolicy: @escaping @Sendable (String) -> String = { command in
+                String(
+                    localized: "Blocked: \(command) matches this server's deny list and was not run.",
+                    bundle: LanguageSettings.currentBundle
+                )
+            }
+        ) {
+            self.userRejectedCommand = userRejectedCommand
+            self.commandDeniedByPolicy = commandDeniedByPolicy
+        }
 
         static let english = LocalizedTexts(
             userRejectedCommand: "User rejected this command"
@@ -473,12 +487,19 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
                 case .forbidden:
                     // 禁止分支：命中安全策略，告知 AI 后由其生成拒绝回复，随后直接终止迭代。
                     let commandDesc = arguments["command"] as? String ?? toolCall.toolName
-                    let blockedMsg = Message(role: .system, content: "BLOCKED: `\(commandDesc)` is a forbidden destructive command. You must refuse to execute it, explain why it is dangerous, and suggest the user run it manually via terminal if truly needed. Do NOT attempt alternative commands to achieve the same effect.")
+                    let deniedByPolicy = await commandIsDeniedByPolicy(toolName: tool.name, arguments: arguments)
+                    let blockedContent = deniedByPolicy
+                        ? localizedTexts.commandDeniedByPolicy(commandDesc)
+                        : "BLOCKED: `\(commandDesc)` is a forbidden destructive command. You must refuse to execute it, explain why it is dangerous, and suggest the user run it manually via terminal if truly needed. Do NOT attempt alternative commands to achieve the same effect."
+                    let modelOutput = deniedByPolicy
+                        ? "BLOCKED: This command matches the server deny list. Do not execute it or attempt to evade the deny list. Explain to the user that their command policy blocked it."
+                        : "BLOCKED: This operation is forbidden for safety reasons. Explain to the user why and stop."
+                    let blockedMsg = Message(role: .system, content: blockedContent)
                     newMessages.append(blockedMsg)
                     history.append(blockedMsg)
 
                     var finalResponse = try await nextResponseAfterToolResult(
-                        output: "BLOCKED: This operation is forbidden for safety reasons. Explain to the user why and stop.",
+                        output: modelOutput,
                         toolCall: toolCall, history: &history, serverContext: serverContext, serverCapabilities: capabilities
                     )
                     // AI 可能先返回更多 toolCall（多 tool 同轮），持续回填拒绝直到拿到文本回复。
@@ -538,9 +559,19 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     /// 允许并行预执行的只读工具（仍需本次参数被工具判定为 `.safe`）。
     static let parallelSafeToolNames: Set<String> = [
         "read_file", "glob", "grep", "web_search", "web_fetch", "memory_read", "execute_ssh_command",
+        "poll_background_command",
     ]
     /// 单批并行的最大调用数。
     static let maxParallelReadOnlyCalls = 4
+
+    /// 拒绝列表命中时，聊天里用策略文案，而不是「破坏性禁止命令」那句。
+    private func commandIsDeniedByPolicy(toolName: String, arguments: [String: Any]) async -> Bool {
+        guard toolName == "execute_ssh_command",
+              let serverID,
+              let command = arguments["command"] as? String else { return false }
+        let policy = await approvalPolicyStore.commandPolicy(for: serverID)
+        return CommandHardening.policyDecision(command: command, policy: policy) == .denied
+    }
 
     /// 是否可与相邻只读调用并行：只读工具 + 本次参数判定为 safe + 当前权限下无需确认 + 参数完整。
     func isParallelSafe(_ call: ToolCall) -> Bool {
