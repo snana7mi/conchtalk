@@ -5332,8 +5332,6 @@
         }
       }
     },
-    "Are you sure you want to delete \"%@\"? This action cannot be undone." : {
-    },
     "A runbook needs at least one user request." : {
       "localizations" : {
         "ja" : { "stringUnit" : { "state" : "translated", "value" : "ランブックには少なくとも1件のユーザー依頼が必要です。" } },
@@ -5494,6 +5492,54 @@
       "localizations" : {
         "ja" : { "stringUnit" : { "state" : "translated", "value" : "各サーバーで何をしますか？" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每台服务器要做什么？" } }
+      }
+    },
+    "Attach file" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファイルを添付" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "附加文件" } }
+      }
+    },
+    "Attach to chat" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "チャットに添付" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "附加到聊天" } }
+      }
+    },
+    "Browse remote files" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "リモートファイルを閲覧" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "浏览远端文件" } }
+      }
+    },
+    "Could not open directory" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ディレクトリを開けませんでした" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法打开目录" } }
+      }
+    },
+    "Download" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ダウンロード" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下载" } }
+      }
+    },
+    "No preview for this file type." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "この種類のファイルはプレビューできません。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此文件类型无法预览。" } }
+      }
+    },
+    "Share" : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "共有" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "分享" } }
+      }
+    },
+    "This file is too large to preview." : {
+      "localizations" : {
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファイルが大きすぎてプレビューできません。" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文件太大，无法预览。" } }
       }
     }
   },

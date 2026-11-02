@@ -461,6 +461,26 @@ actor NIOSSHClient: SSHClientProtocol {
         }
     }
 
+    /// 通过 SFTP 列出目录，目录项按文件夹在前、名称排序。
+    func sftpListDirectory(path: String) async throws -> [RemoteFileEntry] {
+        guard _isConnected, let client else {
+            throw SSHError.notConnected
+        }
+        let directory = RemotePath.normalize(path)
+        return try await client.withSFTP { sftp in
+            let names = try await sftp.listDirectory(atPath: directory)
+            let items = names.flatMap(\.components).map { component in
+                RemoteDirectoryIndex.Item(
+                    name: component.filename,
+                    longname: component.longname,
+                    permissions: component.attributes.permissions,
+                    size: component.attributes.size
+                )
+            }
+            return RemoteDirectoryIndex.entries(directory: directory, items: items)
+        }
+    }
+
     /// 分块 SFTP 写入，每写完一块调用 onProgress 回调。
     func sftpWriteFileChunked(
         path: String,

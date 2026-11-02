@@ -36,6 +36,8 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
     var sftpFileSizeError: Error?
     /// 按调用顺序消耗。用完后回到 `sftpFileSizeError` / `sftpFileSizeResult`。
     var sftpFileSizeSequence: [Result<UInt64, Error>] = []
+    var sftpListResult: [RemoteFileEntry] = []
+    var sftpListError: Error?
     var sftpWriteChunkedError: Error?
     var streamingOutput: [String] = []
     var streamingError: Error?
@@ -156,6 +158,12 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
         return sftpFileSizeResult
     }
 
+    func sftpListDirectory(path: String) async throws -> [RemoteFileEntry] {
+        callHistory.append(CallRecord(method: "sftpListDirectory", arguments: ["path": path]))
+        if let error = sftpListError { throw error }
+        return sftpListResult
+    }
+
     func sftpWriteFileChunked(
         path: String,
         data: Data,
@@ -189,6 +197,8 @@ final class MockSSHClient: SSHClientProtocol, @unchecked Sendable {
         sftpFileSizeResult = 0
         sftpFileSizeError = nil
         sftpFileSizeSequence = []
+        sftpListResult = []
+        sftpListError = nil
         sftpWriteChunkedError = nil
         streamingOutput = []
         streamingError = nil
