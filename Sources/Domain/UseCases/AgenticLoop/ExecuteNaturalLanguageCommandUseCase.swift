@@ -559,6 +559,7 @@ nonisolated final class ExecuteNaturalLanguageCommandUseCase: @unchecked Sendabl
     /// 允许并行预执行的只读工具（仍需本次参数被工具判定为 `.safe`）。
     static let parallelSafeToolNames: Set<String> = [
         "read_file", "glob", "grep", "web_search", "web_fetch", "memory_read", "execute_ssh_command",
+        "poll_background_command",
     ]
     /// 单批并行的最大调用数。
     static let maxParallelReadOnlyCalls = 4

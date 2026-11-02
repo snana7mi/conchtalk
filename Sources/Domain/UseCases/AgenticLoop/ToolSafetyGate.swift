@@ -53,7 +53,14 @@ nonisolated enum ToolSafetyGate {
             serverID: serverID,
             policyStore: policyStore
         )
-        let effectiveSafety = permissionLevel.effectiveSafetyLevel(policyAdjusted)
+        // 允许列表可以跳过命令本身的确认，但不能把后台启动降成自动执行。
+        // 后台模式会留下进程和日志；禁止与拒绝列表的结果保持不变。
+        let safetyAfterPolicy = keepBackgroundConfirmation(
+            policyAdjusted,
+            toolName: tool.name,
+            arguments: arguments
+        )
+        let effectiveSafety = permissionLevel.effectiveSafetyLevel(safetyAfterPolicy)
         // 写操作属性来自工具原始分级，不应被 strict/permissive 或允许列表的审批映射改变。
         let hadWrite = rawSafety == .needsConfirmation
 
@@ -134,5 +141,19 @@ nonisolated enum ToolSafetyGate {
         }
         let policy = await policyStore.commandPolicy(for: serverID)
         return CommandHardening.applying(policy, to: raw, command: command)
+    }
+
+    /// `background: true` 在允许列表命中后仍需要确认。禁止和拒绝不受影响。
+    private static func keepBackgroundConfirmation(
+        _ adjusted: SafetyLevel,
+        toolName: String,
+        arguments: [String: Any]
+    ) -> SafetyLevel {
+        guard toolName == "execute_ssh_command",
+              adjusted == .safe,
+              ToolArguments.bool(arguments["background"]) else {
+            return adjusted
+        }
+        return .needsConfirmation
     }
 }

@@ -44,8 +44,8 @@ actor CommandPolicyStore {
             .appendingPathComponent("command_policies.json")
     }
 
-    private struct Payload: Codable {
-        struct Entry: Codable {
+    nonisolated private struct Payload: Codable {
+        nonisolated struct Entry: Codable {
             var serverID: UUID
             var allow: [String]
             var deny: [String]

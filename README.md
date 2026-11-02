@@ -89,10 +89,12 @@ ConchTalk ships with a core tool registry for remote task execution. Depending o
 
 Core tools include:
 
-- `execute_ssh_command`
+- `execute_ssh_command` (optional `timeout` 1–600s, default 30; `background: true` detaches with nohup and a log file)
+- `poll_background_command` (tail the log of a background command and report whether its pid is still running)
 - `read_file`
 - `write_file`
 - `edit_file`
+- `rollback_file` (restore the session snapshot taken before the latest `write_file` / `edit_file` on that path)
 - `glob`
 - `grep`
 - `upload_file`
@@ -138,8 +140,10 @@ Permission modes:
 Hardening rules applied on top of safety levels:
 
 - SSH host keys are not trusted silently. The first connection shows the SHA256 fingerprint and continues only after you confirm it. If the key changes, the app shows the stored fingerprint and the new one; you can keep the old key or reset it. Known host keys can be listed and deleted in Settings.
-- Per-server command policy: a deny entry blocks a matching command even when it would otherwise be safe or covered by an always-allow rule. A custom allow entry can skip confirmation only when the command is not in the built-in forbidden set. Always-allow rules stay visible on that screen and can be revoked.
-- `execute_ssh_command`: a command auto-runs only when every segment is still a read-only allowlisted form. Wrappers (`env` with a child command, `sudo`, `nohup`, `xargs`, `timeout`, `nice`, `time`, `command`, `exec`, `sh`/`bash -c`, and similar) are not auto-safe. Destructive subcommands and flags of allowlisted tools need confirmation (`find -delete`/`-execdir`/`-ok`/`-fprint`/`-fprintf`/`-fls`, `ip link set`, `ip addr flush|add|del`, `ip route add|del`, `hostname <name>`, `date -s`/`--set`, `git branch -d`/`-D`, `git diff --output`). Any write redirection (`>`, `>>`), heredoc/herestring (`<<`), or `tee` still needs confirmation — the AI-reported `is_destructive` flag can only raise risk, never lower it. Recursive `rm` of `/`, `/*`, `~`, `~/`, `$HOME`, or a top-level system directory is forbidden regardless of flag spelling or wrappers; `rm -rf /tmp/build` is not. `mkfs` matches on word boundaries (`mkfs.ext4` is forbidden; `notmkfs` is not).
+- Per-server command policy: a deny entry blocks a matching command even when it would otherwise be safe or covered by an always-allow rule. A custom allow entry can skip confirmation only when the command is not in the built-in forbidden set. `background: true` still needs confirmation, because it leaves a detached process and a log file. Always-allow rules stay visible on that screen and can be revoked.
+- `execute_ssh_command`: a command auto-runs only when every segment is still a read-only allowlisted form. Wrappers (`env` with a child command, `sudo`, `nohup`, `xargs`, `timeout`, `nice`, `time`, `command`, `exec`, `sh`/`bash -c`, and similar) are not auto-safe. Destructive subcommands and flags of allowlisted tools need confirmation (`find -delete`/`-execdir`/`-ok`/`-fprint`/`-fprintf`/`-fls`, `ip link set`, `ip addr flush|add|del`, `ip route add|del`, `hostname <name>`, `date -s`/`--set`, `git branch -d`/`-D`, `git diff --output`). Any write redirection (`>`, `>>`), heredoc/herestring (`<<`), or `tee` still needs confirmation — the AI-reported `is_destructive` flag can only raise risk, never lower it. Recursive `rm` of `/`, `/*`, `~`, `~/`, `$HOME`, or a top-level system directory is forbidden regardless of flag spelling or wrappers; `rm -rf /tmp/build` is not. `mkfs` matches on word boundaries (`mkfs.ext4` is forbidden; `notmkfs` is not). The tool's `timeout` parameter is clamped to 1–600 seconds (default 30). On timeout the remote process group is killed and the SSH connection stays up. `background: true` always needs confirmation: the command is detached with nohup, stdout/stderr go to a log under `/tmp/conchtalk-bg/`, and `poll_background_command` tails that log. Polling does not start a separate iOS task; an in-flight agent task keeps using the existing Live Activity
+- `read_file`: private keys, `*.pem`, `*.key`, `.env`, `/etc/shadow`, and similar paths require confirmation. Reads are capped at 1 MiB. Binary files are refused before the body is loaded unless `encoding` is `base64` (still capped). Line numbers are 1-based
+- `write_file` / `edit_file`: content is written to a temp file in the same directory, then renamed into place, preserving the original mode and owner when the server allows it. Each change stores a session snapshot; `rollback_file` restores it, and the approval card shows the diff
 - `web_fetch`: refuses to fetch non-public addresses (loopback, private ranges, link-local/cloud metadata, CGNAT, IPv6 loopback/ULA) before any remote command runs
 - `web_search`: calls the selected Brave, Exa, AnySearch, or Tavily API directly with the user's Keychain-protected key; it is absent from the model tool list while disabled or unconfigured
 - Parallel tool calls: only calls that the safety gate would auto-run (an allowlist of read-only tools whose arguments evaluate as `safe`) are run concurrently. A write, an approval prompt, or any other tool ends the parallel batch, so nothing after it runs before you approve it. `strict` mode never runs calls in parallel.

@@ -9,7 +9,7 @@ import NIOCore
 // MARK: - Known Host Status
 
 /// KnownHostStatus：主机密钥查询结果，描述当前主机密钥与已存储指纹的匹配关系。
-enum KnownHostStatus: Sendable {
+nonisolated enum KnownHostStatus: Sendable {
     /// 该主机从未连接过，无已知指纹。
     case unknown
     /// 主机密钥指纹与已存储指纹一致。
@@ -32,7 +32,7 @@ enum KnownHostStatus: Sendable {
 actor KnownHostsStore {
 
     /// 单条主机指纹记录。
-    private struct HostEntry: Codable, Sendable {
+    nonisolated private struct HostEntry: Codable, Sendable {
         let host: String
         let port: Int
         let fingerprint: String

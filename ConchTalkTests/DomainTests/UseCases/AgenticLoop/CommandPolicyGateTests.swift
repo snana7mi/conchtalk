@@ -20,6 +20,7 @@ struct CommandPolicyGateTests {
         rawSafety: SafetyLevel,
         policy: ServerCommandPolicy,
         permission: PermissionLevel = .standard,
+        background: Bool = false,
         onConfirm: @escaping @Sendable (ConfirmationRequest) async -> CommandApproval = { _ in .denied }
     ) async -> (ToolGateResult, MockTool) {
         let tool = MockTool(name: "execute_ssh_command", safetyLevel: rawSafety, executeResult: ToolExecutionResult(output: "ok"))
@@ -27,7 +28,10 @@ struct CommandPolicyGateTests {
         ssh.executeResult = "ok"
         let gatePolicy = Policy()
         gatePolicy.policy = policy
-        let args: [String: Any] = ["command": command, "explanation": "t", "is_destructive": true]
+        var args: [String: Any] = ["command": command, "explanation": "t", "is_destructive": true]
+        if background {
+            args["background"] = true
+        }
         let call = ToolCall(
             id: "1",
             toolName: "execute_ssh_command",
@@ -83,6 +87,19 @@ struct CommandPolicyGateTests {
             policy: ServerCommandPolicy(allow: ["rm -rf /"])
         )
         if case .forbidden = result {} else { Issue.record("应禁止") }
+        #expect(tool.executeCalled == 0)
+    }
+
+    @Test("允许列表不能跳过后台命令的确认")
+    func allowDoesNotSkipBackgroundConfirmation() async {
+        let (result, tool) = await evaluate(
+            command: "ls",
+            rawSafety: .needsConfirmation,
+            policy: ServerCommandPolicy(allow: ["ls"]),
+            background: true,
+            onConfirm: { _ in .denied }
+        )
+        if case .denied = result {} else { Issue.record("应等待确认并被拒绝") }
         #expect(tool.executeCalled == 0)
     }
 

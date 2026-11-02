@@ -8,7 +8,7 @@ import Foundation
 /// - 可选在写入前备份原文件为 .bak
 nonisolated struct WriteFileTool: ToolProtocol, @unchecked Sendable {
     let name = "write_file"
-    let description = "Prefer this over execute_ssh_command with sed/tee/echo. Write content to a file on the remote server. Supports text (overwrite/append) and binary (base64) modes, with optional backup."
+    let description = "Prefer this over execute_ssh_command with sed/tee/echo. Write content to a file on the remote server. Supports text (overwrite/append) and binary (base64) modes, with optional backup. Writes are atomic (temp file in the same directory, then rename) and keep the original mode and owner when the server allows it. A session snapshot is saved first so rollback_file can undo the change."
 
     let parametersSchema: [String: Any] = [
         "type": "object",
@@ -42,17 +42,24 @@ nonisolated struct WriteFileTool: ToolProtocol, @unchecked Sendable {
         "required": ["path", "content", "explanation"],
     ]
 
+    private let journal: RemoteFileChangeJournal
+
+    init(journal: RemoteFileChangeJournal = .shared) {
+        self.journal = journal
+    }
+
     func validateSafety(arguments: [String: Any]) -> SafetyLevel {
         .needsConfirmation
     }
 
     func execute(arguments: [String: Any], sshClient: SSHClientProtocol) async throws -> ToolExecutionResult {
-        guard let path = arguments["path"] as? String else {
+        guard let rawPath = arguments["path"] as? String else {
             throw ToolError.missingParameter("path")
         }
         guard let content = arguments["content"] as? String else {
             throw ToolError.missingParameter("content")
         }
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let encoding = arguments["encoding"] as? String ?? "text"
         let append = arguments["append"] as? Bool ?? false
@@ -62,6 +69,33 @@ nonisolated struct WriteFileTool: ToolProtocol, @unchecked Sendable {
         if encoding == "base64" && append {
             throw ToolError.invalidArguments("Append mode is not supported for base64 encoding")
         }
+
+        let dataToWrite: Data
+        if encoding == "base64" {
+            guard let decoded = Data(base64Encoded: content) else {
+                throw ToolError.invalidArguments("Invalid base64 encoding in content")
+            }
+            dataToWrite = decoded
+        } else {
+            // 文本模式走 SFTP，避免 heredoc 分隔符碰撞、shell 注入和结尾多余换行。
+            guard let contentData = content.data(using: .utf8) else {
+                throw ToolError.invalidArguments("Content is not valid UTF-8 text")
+            }
+            // 自动创建父目录（SFTP 写入不会自动建目录）
+            let dir = (path as NSString).deletingLastPathComponent
+            if !dir.isEmpty && dir != "/" {
+                _ = try await sshClient.execute(command: "mkdir -p \(shellEscape(dir))")
+            }
+            if append {
+                let existing = (try? await sshClient.sftpReadFile(path: path)) ?? Data()
+                dataToWrite = existing + contentData
+            } else {
+                dataToWrite = contentData
+            }
+        }
+
+        // 参数已经合法。改文件前先留会话快照，复制失败则不写入。
+        let snapshot = try await RemoteFileHistory.capture(path: path, sshClient: sshClient, journal: journal)
 
         // 写入前备份：用户显式开启时，备份失败必须可见，不能静默吞错。
         if createBackup {
@@ -77,38 +111,9 @@ nonisolated struct WriteFileTool: ToolProtocol, @unchecked Sendable {
             }
         }
 
-        if encoding == "base64" {
-            // 二进制模式：SFTP 写入
-            guard let decoded = Data(base64Encoded: content) else {
-                throw ToolError.invalidArguments("Invalid base64 encoding in content")
-            }
-            try await sshClient.sftpWriteFile(path: path, data: decoded)
-            let size = try await sshClient.sftpFileSize(path: path)
-            return ToolExecutionResult(output: "Written to \(path) successfully (\(size) bytes)")
-        } else {
-            // 文本模式：走 SFTP 二进制安全写入，避免 heredoc 分隔符碰撞 / shell 注入 /
-            // 结尾多余换行等问题（旧实现用 `cat <<'DELIM'`，content 含与分隔符相同的行会截断）。
-            guard let contentData = content.data(using: .utf8) else {
-                throw ToolError.invalidArguments("Content is not valid UTF-8 text")
-            }
-
-            // 自动创建父目录（SFTP 写入不会自动建目录）
-            let dir = (path as NSString).deletingLastPathComponent
-            if !dir.isEmpty && dir != "/" {
-                _ = try await sshClient.execute(command: "mkdir -p \(shellEscape(dir))")
-            }
-
-            let dataToWrite: Data
-            if append {
-                let existing = (try? await sshClient.sftpReadFile(path: path)) ?? Data()
-                dataToWrite = existing + contentData
-            } else {
-                dataToWrite = contentData
-            }
-            try await sshClient.sftpWriteFile(path: path, data: dataToWrite)
-            let size = try await sshClient.sftpFileSize(path: path)
-            let verb = append ? "Appended to" : "Written to"
-            return ToolExecutionResult(output: "\(verb) \(path) successfully (\(size) bytes)")
-        }
+        try await sshClient.sftpWriteFile(path: path, data: dataToWrite)
+        let size = try await sshClient.sftpFileSize(path: path)
+        let verb = append ? "Appended to" : "Written to"
+        return ToolExecutionResult(output: "\(verb) \(path) successfully (\(size) bytes).\(RemoteFileHistory.note(for: snapshot))")
     }
 }
