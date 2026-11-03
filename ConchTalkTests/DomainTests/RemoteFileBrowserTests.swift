@@ -49,7 +49,7 @@ struct RemoteFileBrowserTests {
         let binary = Data([0x00, 0x01, 0x02])
         #expect(RemoteFilePreviewPolicy.preview(fileName: "a.bin", data: binary) == .binary)
 
-        let huge = Data(repeating: 0x61, count: RemoteFilePreviewPolicy.textPreviewLimit + 1)
+        let huge = Data(repeating: 0x61, count: Int(RemoteFilePreviewPolicy.textPreviewLimit) + 1)
         if case .tooLarge = RemoteFilePreviewPolicy.preview(fileName: "a.log", data: huge) {
         } else {
             Issue.record("expected tooLarge")

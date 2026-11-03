@@ -175,7 +175,7 @@ struct KnownHostsStoreTests {
 
 nonisolated private final class ScriptedHostKeyPrompter: HostKeyPrompting, @unchecked Sendable {
     var decision: HostKeyPromptDecision = .reject
-    private(set) var prompts: [HostKeyPrompt] = []
+    var prompts: [HostKeyPrompt] = []
 
     func decide(_ prompt: HostKeyPrompt) async -> HostKeyPromptDecision {
         prompts.append(prompt)

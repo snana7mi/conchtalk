@@ -20,7 +20,7 @@ nonisolated enum CommandPolicyDecision: Sendable, Equatable {
 }
 
 /// CommandPolicyEditError：编辑列表时的校验失败原因。界面负责把它们翻成用户语言。
-nonisolated enum CommandPolicyEditError: Sendable, Equatable {
+nonisolated enum CommandPolicyEditError: Error, Sendable, Equatable {
     case empty
     case duplicate
     case forbiddenAllow

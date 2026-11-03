@@ -12,11 +12,14 @@ final class HostKeyPromptCenter: HostKeyPrompting {
 
     func decide(_ prompt: HostKeyPrompt) async -> HostKeyPromptDecision {
         await withCheckedContinuation { continuation in
-            if waiter == nil {
-                pending = prompt
-                waiter = continuation
-            } else {
-                queue.append((prompt, continuation))
+            // The body runs synchronously on the caller's executor (this @MainActor method).
+            MainActor.assumeIsolated {
+                if waiter == nil {
+                    pending = prompt
+                    waiter = continuation
+                } else {
+                    queue.append((prompt, continuation))
+                }
             }
         }
     }

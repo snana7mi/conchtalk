@@ -103,7 +103,7 @@ struct HealthCheckTests {
                 return .success(HealthProbeReading(disks: [DiskSample(mount: "/", usedPercent: 10)], loadAverage: 0.1, services: []))
             },
             notify: { _, breaches in
-                await notes.add(breaches.count)
+                Task { await notes.add(breaches.count) }
             }
         )
 
