@@ -137,7 +137,7 @@ struct SettingsView: View {
             Section(String(localized: "About", bundle: LanguageSettings.currentBundle)) {
                 LabeledContent(
                     String(localized: "Version", bundle: LanguageSettings.currentBundle),
-                    value: "1.0.0"
+                    value: AppVersion.displayString
                 )
                 LabeledContent(
                     String(localized: "App", bundle: LanguageSettings.currentBundle),

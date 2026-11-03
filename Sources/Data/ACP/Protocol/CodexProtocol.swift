@@ -230,7 +230,7 @@ nonisolated struct CodexRPCRequest: Encodable, Sendable {
 extension CodexRPCRequest {
     static func initialize(id: Int) -> CodexRPCRequest {
         CodexRPCRequest(id: id, method: "initialize", params: [
-            "clientInfo": .object(["name": .string("ConchTalk"), "version": .string("1.0.0")]),
+            "clientInfo": .object(["name": .string("ConchTalk"), "version": .string(AppVersion.shortVersion)]),
             "capabilities": .object(["experimentalApi": .bool(true)])
         ])
     }

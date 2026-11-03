@@ -2392,7 +2392,20 @@
       }
     },
     "Manage SSH Keys" : {
-
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 鍵を管理"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理 SSH 密钥"
+          }
+        }
+      }
     },
     "Max Context" : {
       "comment" : "A label describing the maximum number of tokens to use for context in the conversation.",
@@ -3611,7 +3624,20 @@
       }
     },
     "SSH Keys" : {
-
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 鍵"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 密钥"
+          }
+        }
+      }
     },
     "Standard" : {
       "localizations" : {

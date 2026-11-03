@@ -116,7 +116,7 @@ actor ACPClientConnection {
                 fs: FileSystemCapabilities(readTextFile: false, writeTextFile: false),
                 terminal: false
             ),
-            clientInfo: ClientInfo(name: "ConchTalk", version: "1.0.0")
+            clientInfo: ClientInfo(name: "ConchTalk", version: AppVersion.shortVersion)
         )
 
         guard let resultValue = try await sendRequest(method: "initialize", params: params) else {
