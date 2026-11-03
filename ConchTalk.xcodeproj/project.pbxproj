@@ -585,7 +585,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk.ConchTalkLiveActivity;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -621,7 +621,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk.ConchTalkLiveActivity;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cheung.ConchTalk.LiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
