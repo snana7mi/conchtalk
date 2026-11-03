@@ -5,8 +5,8 @@ import Foundation
 
 // MARK: - EditFileTool
 
-@Suite("EditFileTool")
-struct EditFileToolTests {
+@Suite("EditFileTool basics")
+struct EditFileToolBasicTests {
 
     private let sut = EditFileTool()
 

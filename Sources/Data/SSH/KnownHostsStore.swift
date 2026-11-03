@@ -9,7 +9,7 @@ import NIOCore
 // MARK: - Known Host Status
 
 /// KnownHostStatus：主机密钥查询结果，描述当前主机密钥与已存储指纹的匹配关系。
-nonisolated enum KnownHostStatus: Sendable {
+nonisolated enum KnownHostStatus: Sendable, Equatable {
     /// 该主机从未连接过，无已知指纹。
     case unknown
     /// 主机密钥指纹与已存储指纹一致。
@@ -232,7 +232,7 @@ nonisolated private final class HostKeyFileLock {
     init?(url: URL) {
         let fd = Darwin.open(url.path, O_CREAT | O_RDWR, mode_t(0o600))
         guard fd >= 0 else { return nil }
-        if Darwin.flock(fd, LOCK_EX) != 0 {
+        if flock(fd, LOCK_EX) != 0 {
             Darwin.close(fd)
             return nil
         }
@@ -240,7 +240,7 @@ nonisolated private final class HostKeyFileLock {
     }
 
     deinit {
-        Darwin.flock(fd, LOCK_UN)
+        _ = flock(fd, LOCK_UN)
         Darwin.close(fd)
     }
 }

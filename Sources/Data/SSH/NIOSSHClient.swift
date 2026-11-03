@@ -511,7 +511,7 @@ actor NIOSSHClient: SSHClientProtocol {
     /// 替换失败时删除临时文件。硬链接不会保留（inode 换成了临时文件）。
     private func writeAtomically(
         path: String,
-        body: @Sendable (SFTPClient, String) async throws -> Void
+        body: @escaping @Sendable (SFTPClient, String) async throws -> Void
     ) async throws {
         guard _isConnected, let client else {
             throw SSHError.notConnected

@@ -149,11 +149,11 @@ private struct HealthCheckEditor: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .onAppear(perform: load)
+        .onAppear(perform: loadPlan)
         .onDisappear(perform: persist)
     }
 
-    private func load() {
+    private func loadPlan() {
         if let plan = model.plan(for: server.id) {
             enabled = plan.enabled
             disk = plan.thresholds.diskUsedPercent

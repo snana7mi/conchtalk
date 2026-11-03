@@ -14,8 +14,8 @@ nonisolated enum RemoteFilePreview: Equatable, Sendable {
 /// 传输上限与聊天附件一致，避免把大文件整段读进内存。
 nonisolated enum RemoteFilePreviewPolicy {
     static let maxTransferBytes: Int64 = 50 * 1024 * 1024
-    static let textPreviewLimit = 256 * 1024
-    static let imagePreviewLimit = 8 * 1024 * 1024
+    static let textPreviewLimit: Int64 = 256 * 1024
+    static let imagePreviewLimit: Int64 = 8 * 1024 * 1024
 
     private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif"]
     private static let textExtensions: Set<String> = [
