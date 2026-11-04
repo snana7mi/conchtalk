@@ -1,6 +1,6 @@
 # ConchTalk Privacy Policy
 
-_Last updated: August 6, 2026_
+_Last updated: November 5, 2026_
 
 ConchTalk ("the app", "we", "us") is an AI-assisted SSH client for iOS. We do not operate a ConchTalk backend for the app. There is no ConchTalk account or sign-in, subscription or billing system, managed AI/search gateway, request relay, or cloud sync. Data stays on your device or is sent directly from the app to the services and remote machines described below.
 
@@ -10,7 +10,7 @@ ConchTalk ("the app", "we", "us") is an AI-assisted SSH client for iOS. We do no
 - We do **not** require or provide a ConchTalk account, sign-in, subscription, or billing profile.
 - Server configurations, chat history, memories, and system profiles are stored locally on your device.
 - SSH passwords, private keys, and AI or optional web-search provider API keys are stored in the iOS Keychain.
-- AI requests are sent directly to the AI endpoint you configure, under that provider's terms.
+- AI requests are sent directly to the AI endpoint you configure, under that provider's terms. If you choose Apple Private Cloud Compute as the AI provider (iOS 27 or later), your prompts, conversation context, and SSH command output are processed by Apple Private Cloud Compute instead.
 - When you enable web search, search queries are sent directly to the Brave, Exa, AnySearch, or Tavily service you select, under that provider's terms.
 - SSH traffic is sent directly to remote machines you configure. There is no ConchTalk relay.
 - To display a server's country, the public IP address resolved from its configured host is sent directly to the third-party Country API at `api.country.is`.
@@ -24,6 +24,8 @@ The app stores server connection details, chat history, memories, system profile
 ### 2. AI processing
 
 When you ask ConchTalk to perform a task, your prompt and relevant context are sent directly from the app to the AI endpoint you configured. ConchTalk does not provide a managed AI endpoint or fallback route. Your chosen provider may process and retain this data according to its own privacy policy and your agreement with that provider. Any account, subscription, or billing relationship used to obtain that provider's API access is between you and the provider, not ConchTalk.
+
+If you choose **Apple Private Cloud Compute** as the AI provider in Settings (available on iOS 27 or later with Apple Intelligence), your prompts, conversation history, server context, and tool results — including SSH command output and file contents read on your servers — are sent through the system's Foundation Models framework to Apple's Private Cloud Compute servers for processing. No API key is used, and ConchTalk does not receive or relay these requests. Apple states that data sent to Private Cloud Compute is used only to fulfil the request and is not stored; this processing is governed by Apple's privacy policy. Apple applies a per-person daily usage limit. If Private Cloud Compute is unavailable or the limit is reached and you have also configured your own AI endpoint, the app sends that request to your endpoint instead, as described above.
 
 ### 3. SSH and direct-agent connections
 
@@ -52,7 +54,7 @@ The app may use local iOS features such as notifications, Live Activities, and o
 
 ## Data Retention and Deletion
 
-Local data remains on your device until you delete it or uninstall the app. When you delete supported records in the app, they may remain as locally stored deletion records for up to 30 days before physical cleanup. Copies contained in device backups are governed by your Apple backup settings. Data sent to your AI provider, selected web-search provider, Country API, or remote servers is retained according to the policies and configuration of those services, which ConchTalk does not control.
+Local data remains on your device until you delete it or uninstall the app. When you delete supported records in the app, they may remain as locally stored deletion records for up to 30 days before physical cleanup. Copies contained in device backups are governed by your Apple backup settings. Data sent to your AI provider (including Apple Private Cloud Compute, if selected), selected web-search provider, Country API, or remote servers is retained according to the policies and configuration of those services, which ConchTalk does not control.
 
 ## Security
 

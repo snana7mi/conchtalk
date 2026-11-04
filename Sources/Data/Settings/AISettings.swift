@@ -70,6 +70,13 @@ nonisolated struct AISettings {
 
     var maxContextTokens: Int { maxContextTokensK * 1000 }
 
+    /// 自有端点三要素（Key / 端点 / 模型）是否均已配置；PCC 不可用时据此决定能否回退。
+    var hasCustomEndpointConfigured: Bool {
+        !apiKey.isEmpty
+            && !endpointURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// 解析 Anthropic 请求实际使用的 max_tokens：用户值优先（下限 1024），否则按模型自动。
     func resolvedMaxOutputTokens() -> Int {
         maxOutputTokens > 0
@@ -96,6 +103,12 @@ nonisolated struct AISettings {
     /// 只读取上下文窗口相关设置，不触碰 Keychain 或执行旧凭据迁移。
     /// 已知模型（Claude）时按模型窗口封顶，见 `effectiveMaxContextTokens`。
     static func loadMaxContextTokens(defaults: UserDefaults = .standard) -> Int {
+        // 选用 Apple PCC 时按其窗口预算（回退到自有端点时同样保守地使用较小窗口）。
+        if AIProviderSettings.isPCCSelected(defaults: defaults) {
+            return AIProviderSettings.pccContextBudget(
+                contextSize: AIProviderSettings.cachedPCCContextSize(defaults: defaults)
+            )
+        }
         let storedK = defaults.integer(forKey: "aiMaxContextTokensK")
         let configured = (storedK > 0 ? storedK : 128) * 1000
         let modelName = defaults.string(forKey: "aiModelName") ?? ""

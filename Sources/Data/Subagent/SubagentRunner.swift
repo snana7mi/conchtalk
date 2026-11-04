@@ -92,8 +92,8 @@ nonisolated final class SubagentRunner: SubagentRunning, @unchecked Sendable {
         let restricted = makeRestrictedRegistry(for: def)
         let scopedAIService: AIServiceProtocol
         let scopedPrompt: String
-        if let userAIService = aiService as? UserAIService {
-            scopedAIService = userAIService.withToolRegistry(
+        if let scopableAIService = aiService as? any ToolScopableAIService {
+            scopedAIService = scopableAIService.withToolRegistry(
                 restricted,
                 trustedInstructions: def.systemPrompt
             )
