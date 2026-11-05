@@ -10,7 +10,8 @@ final class DependencyContainer {
     let store: SwiftDataStore
     let sshManager: SSHSessionManager
     let keychainService: KeychainService
-    let aiService: UserAIService
+    /// AI 服务路由：按设置在 Apple PCC 与用户自有端点之间选择。
+    let aiService: RoutingAIService
     let toolRegistry: ToolRegistry
     let skillRegistry: SkillRegistry
     /// 用户操作手册及其叠加后的 Skill 查询。工具与模型看到的是这一层，而不是仅包内技能。
@@ -141,7 +142,7 @@ final class DependencyContainer {
             subagentSummaries: subagentRegistry.subagentSummaries
         )
         sshMgr.store = store
-        self.aiService = UserAIService(
+        self.aiService = RoutingAIService(
             keychainService: keychainService,
             toolRegistry: toolRegistry,
             skillRegistry: skillLookup

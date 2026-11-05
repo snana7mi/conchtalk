@@ -17,6 +17,11 @@ struct SettingsView: View {
     @State private var thinkingLevel: AIThinkingLevel
     @State private var apiFormat: APIFormat
     @State private var permissionLevel: PermissionLevel
+    /// AI 服务来源（自有端点 / Apple PCC）。
+    @State private var provider: AIProviderKind
+    @State private var savedProvider: AIProviderKind
+    /// Apple PCC 可用性（可观察，系统状态变化时刷新）。
+    @State private var pccProbe = PCCAvailabilityProbe()
     @State private var webSearchEnabled: Bool
     @State private var webSearchProvider: WebSearchProvider
     @State private var webSearchAPIKeys: [WebSearchProvider: String]
@@ -37,7 +42,8 @@ struct SettingsView: View {
     var healthModel: HealthCheckSettingsModel?
 
     private var hasUnsavedChanges: Bool {
-        apiKey != savedSettings.apiKey
+        provider != savedProvider
+            || apiKey != savedSettings.apiKey
             || endpointURL != savedSettings.endpointURL
             || modelName != savedSettings.modelName
             || maxContextTokensK != savedSettings.maxContextTokensK
@@ -67,6 +73,9 @@ struct SettingsView: View {
         self.healthModel = healthModel
 
         let settings = AISettings.load()
+        let provider = AIProviderSettings.load()
+        _provider = State(initialValue: provider)
+        _savedProvider = State(initialValue: provider)
         let webSearchSettings = WebSearchSettings.load()
         _savedSettings = State(initialValue: settings)
         _savedWebSearchSettings = State(initialValue: webSearchSettings)
@@ -184,6 +193,7 @@ struct SettingsView: View {
                 )
             )
         }
+        .onChange(of: provider) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: apiKey) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: endpointURL) { reportUnsavedChanges = hasUnsavedChanges }
         .onChange(of: modelName) { reportUnsavedChanges = hasUnsavedChanges }
@@ -273,122 +283,230 @@ struct SettingsView: View {
         }
     }
 
-    /// 自有 AI 路线是普通模式的唯一来源，不再提供托管服务开关。
+    /// 实际生效的服务来源：保存为 Apple 但 PCC 不可用（或 iOS 26）时为自有端点；保存值不变。
+    private var effectiveProvider: AIProviderKind {
+        AIProviderSettings.effectiveProvider(
+            saved: provider,
+            isPCCSupportedOS: pccProbe.isSupportedOS,
+            pccUnavailableReason: pccProbe.unavailableReason
+        )
+    }
+
+    /// 已选择 Apple 但当前不可用时的原因（用于提示）。
+    private var pccFallbackReason: PCCFailure? {
+        guard provider == .applePrivateCloudCompute, pccProbe.isSupportedOS else { return nil }
+        return pccProbe.unavailableReason
+    }
+
+    /// Picker 显示生效来源；用户主动选择时才改写保存值。
+    private var providerSelection: Binding<AIProviderKind> {
+        Binding(
+            get: { effectiveProvider },
+            set: { provider = $0 }
+        )
+    }
+
+    /// AI 服务：选择 Apple Private Cloud Compute 或用户自有端点。
     private var aiServiceSection: some View {
         Section {
-            Picker(
-                String(localized: "API Format", bundle: LanguageSettings.currentBundle),
-                selection: $apiFormat
-            ) {
-                ForEach(APIFormat.allCases, id: \.self) { format in
-                    Text(format.displayName).tag(format)
+            // iOS 26 不支持 PCC：完全隐藏选择器。
+            if pccProbe.isSupportedOS {
+                Picker(
+                    String(localized: "Provider", bundle: LanguageSettings.currentBundle),
+                    selection: providerSelection
+                ) {
+                    Label(
+                        AIProviderKind.customEndpoint.displayName,
+                        systemImage: AIProviderKind.customEndpoint.systemImage
+                    )
+                    .tag(AIProviderKind.customEndpoint)
+
+                    // PCC 不可用时保留选项但置灰、不可选，并以副标题说明原因。
+                    let unavailable = pccProbe.unavailableReason
+                    Label {
+                        Text(AIProviderKind.applePrivateCloudCompute.displayName)
+                        if let unavailable {
+                            Text(unavailable.shortReason)
+                        }
+                    } icon: {
+                        Image(systemName: AIProviderKind.applePrivateCloudCompute.systemImage)
+                    }
+                    .tag(AIProviderKind.applePrivateCloudCompute)
+                    .disabled(unavailable != nil)
                 }
             }
 
-            SecureField(
-                String(localized: "API Key", bundle: LanguageSettings.currentBundle),
-                text: $apiKey
-            )
-
-            TextField(
-                String(localized: "Endpoint URL", bundle: LanguageSettings.currentBundle),
-                text: $endpointURL
-            )
-            #if os(iOS)
-            .textInputAutocapitalization(.never)
-            .keyboardType(.URL)
-            #endif
-            .autocorrectionDisabled()
-
-            TextField(
-                String(localized: "Model", bundle: LanguageSettings.currentBundle),
-                text: $modelName
-            )
-            #if os(iOS)
-            .textInputAutocapitalization(.never)
-            #endif
-            .autocorrectionDisabled()
-
-            HStack {
-                Text(String(localized: "Max Context", bundle: LanguageSettings.currentBundle))
-                Spacer()
-                TextField("128", value: $maxContextTokensK, format: .number)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 80)
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                Text(String(localized: "K tokens", bundle: LanguageSettings.currentBundle))
-                    .foregroundStyle(.secondary)
-            }
-
-            if apiFormat == .anthropic {
-                HStack {
-                    Text(String(localized: "Max Output", bundle: LanguageSettings.currentBundle))
-                    Spacer()
-                    TextField(
-                        String(localized: "Auto", bundle: LanguageSettings.currentBundle),
-                        text: maxOutputTokensText
-                    )
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                    Text(String(localized: "tokens", bundle: LanguageSettings.currentBundle))
+            if let reason = pccFallbackReason {
+                LabeledContent(AIProviderKind.applePrivateCloudCompute.displayName) {
+                    Label(reason.shortReason, systemImage: "exclamationmark.circle")
                         .foregroundStyle(.secondary)
                 }
             }
 
-            Picker(
-                String(localized: "Thinking Level", bundle: LanguageSettings.currentBundle),
-                selection: $thinkingLevel
-            ) {
-                ForEach(AIThinkingLevel.allCases, id: \.self) { level in
-                    Text(verbatim: level.displayName).tag(level)
+            if effectiveProvider == .applePrivateCloudCompute {
+                if #available(iOS 27.0, macOS 27.0, *) {
+                    ApplePCCStatusView()
                 }
+                thinkingLevelPicker
+            } else {
+                customEndpointRows
             }
         } header: {
             Text(String(localized: "AI Service", bundle: LanguageSettings.currentBundle))
         } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(
-                    String(
-                        localized: "Enter the API base URL (e.g. https://api.openai.com/v1). The path will be appended automatically.",
-                        bundle: LanguageSettings.currentBundle
-                    )
-                )
-                Text(
-                    String(
-                        localized: "API key, endpoint, and model are required. Requests go directly to this endpoint; ConchTalk has no managed AI fallback.",
-                        bundle: LanguageSettings.currentBundle
-                    )
-                )
-                Text(
-                    String(
-                        localized: "Thinking Level: “Model Default” sends no thinking parameters. Higher levels can help on hard tasks but respond slower and use more tokens.",
-                        bundle: LanguageSettings.currentBundle
-                    )
-                )
-                if apiFormat == .anthropic {
-                    Text(
-                        String(
-                            localized: "Max Output: leave empty to choose automatically by model (32K for Claude 4.6 and newer, 16K for older Claude 4 models, 8K otherwise).",
-                            bundle: LanguageSettings.currentBundle
-                        )
-                    )
-                }
-                if let window = AnthropicModelCapabilities.contextWindow(for: modelName) {
-                    Text(
-                        String(
-                            format: String(
-                                localized: "Max Context: this model has a %@-token context window. Larger values are capped automatically to leave room for the reply.",
+            if effectiveProvider == .applePrivateCloudCompute {
+                applePCCFooter
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    if pccFallbackReason != nil {
+                        Text(
+                            String(
+                                localized: "Apple Private Cloud Compute is unavailable on this device right now, so ConchTalk uses your custom endpoint. Your choice is kept and Apple Private Cloud Compute is used again when it becomes available.",
                                 bundle: LanguageSettings.currentBundle
-                            ),
-                            DirectContextUsage.compact(window)
+                            )
                         )
-                    )
+                    }
+                    customEndpointFooter
                 }
+            }
+        }
+    }
+
+    private var thinkingLevelPicker: some View {
+        Picker(
+            String(localized: "Thinking Level", bundle: LanguageSettings.currentBundle),
+            selection: $thinkingLevel
+        ) {
+            ForEach(AIThinkingLevel.allCases, id: \.self) { level in
+                Text(verbatim: level.displayName).tag(level)
+            }
+        }
+    }
+
+    private var applePCCFooter: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(
+                String(
+                    localized: "Requests are processed by Apple Foundation Models on Private Cloud Compute. No API key is needed. Each person has a daily limit; iCloud+ raises it.",
+                    bundle: LanguageSettings.currentBundle
+                )
+            )
+            Text(
+                String(
+                    localized: "If Private Cloud Compute is unavailable or the daily limit is reached, ConchTalk uses your custom endpoint when one is configured.",
+                    bundle: LanguageSettings.currentBundle
+                )
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var customEndpointRows: some View {
+        Picker(
+            String(localized: "API Format", bundle: LanguageSettings.currentBundle),
+            selection: $apiFormat
+        ) {
+            ForEach(APIFormat.allCases, id: \.self) { format in
+                Text(format.displayName).tag(format)
+            }
+        }
+
+        SecureField(
+            String(localized: "API Key", bundle: LanguageSettings.currentBundle),
+            text: $apiKey
+        )
+
+        TextField(
+            String(localized: "Endpoint URL", bundle: LanguageSettings.currentBundle),
+            text: $endpointURL
+        )
+        #if os(iOS)
+        .textInputAutocapitalization(.never)
+        .keyboardType(.URL)
+        #endif
+        .autocorrectionDisabled()
+
+        TextField(
+            String(localized: "Model", bundle: LanguageSettings.currentBundle),
+            text: $modelName
+        )
+        #if os(iOS)
+        .textInputAutocapitalization(.never)
+        #endif
+        .autocorrectionDisabled()
+
+        HStack {
+            Text(String(localized: "Max Context", bundle: LanguageSettings.currentBundle))
+            Spacer()
+            TextField("128", value: $maxContextTokensK, format: .number)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 80)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+            Text(String(localized: "K tokens", bundle: LanguageSettings.currentBundle))
+                .foregroundStyle(.secondary)
+        }
+
+        if apiFormat == .anthropic {
+            HStack {
+                Text(String(localized: "Max Output", bundle: LanguageSettings.currentBundle))
+                Spacer()
+                TextField(
+                    String(localized: "Auto", bundle: LanguageSettings.currentBundle),
+                    text: maxOutputTokensText
+                )
+                .multilineTextAlignment(.trailing)
+                .frame(width: 100)
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+                Text(String(localized: "tokens", bundle: LanguageSettings.currentBundle))
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        thinkingLevelPicker
+    }
+
+    private var customEndpointFooter: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(
+                String(
+                    localized: "Enter the API base URL (e.g. https://api.openai.com/v1). The path will be appended automatically.",
+                    bundle: LanguageSettings.currentBundle
+                )
+            )
+            Text(
+                String(
+                    localized: "API key, endpoint, and model are required. Requests go directly to this endpoint; ConchTalk has no managed AI fallback.",
+                    bundle: LanguageSettings.currentBundle
+                )
+            )
+            Text(
+                String(
+                    localized: "Thinking Level: “Model Default” sends no thinking parameters. Higher levels can help on hard tasks but respond slower and use more tokens.",
+                    bundle: LanguageSettings.currentBundle
+                )
+            )
+            if apiFormat == .anthropic {
+                Text(
+                    String(
+                        localized: "Max Output: leave empty to choose automatically by model (32K for Claude 4.6 and newer, 16K for older Claude 4 models, 8K otherwise).",
+                        bundle: LanguageSettings.currentBundle
+                    )
+                )
+            }
+            if let window = AnthropicModelCapabilities.contextWindow(for: modelName) {
+                Text(
+                    String(
+                        format: String(
+                            localized: "Max Context: this model has a %@-token context window. Larger values are capped automatically to leave room for the reply.",
+                            bundle: LanguageSettings.currentBundle
+                        ),
+                        DirectContextUsage.compact(window)
+                    )
+                )
             }
         }
     }
@@ -518,6 +636,8 @@ struct SettingsView: View {
             thinkingLevel: thinkingLevel
         )
         settings.save()
+        AIProviderSettings.save(provider)
+        savedProvider = provider
         savedSettings = settings
         maxOutputTokens = settings.maxOutputTokens
         savedWebSearchSettings = webSearchSettings
@@ -527,6 +647,7 @@ struct SettingsView: View {
     }
 
     private func restoreSavedSettings() {
+        provider = savedProvider
         apiKey = savedSettings.apiKey
         endpointURL = savedSettings.endpointURL
         modelName = savedSettings.modelName

@@ -20,6 +20,47 @@ nonisolated struct AIAuxiliaryService: @unchecked Sendable {
             throw AIServiceError.invalidResponse
         }
 
+        let openAIMessages = Self.buildMemorySummaryMessages(
+            recentMessages: recentMessages,
+            existingConversationMemory: existingConversationMemory,
+            existingServerMemory: existingServerMemory,
+            existingGlobalMemory: existingGlobalMemory
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        config.strategy.setAuthHeaders(on: &request, apiKey: config.apiKey)
+        request.timeoutInterval = 30
+
+        request.httpBody = try config.strategy.buildNonStreamingRequestBody(
+            messages: openAIMessages,
+            model: config.modelName,
+            maxTokens: 300,
+            temperature: 0.3,
+            reasoningEffort: "none"
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw config.strategy.parseError(data: data, statusCode: statusCode)
+        }
+
+        let content = try config.strategy.parseNonStreamingContent(from: data)
+        return Self.parseMemorySummary(from: content)
+    }
+
+    // MARK: - Static Helpers
+
+    /// 构建记忆提取请求的消息数组（自有端点与 Apple PCC 共用）。
+    static func buildMemorySummaryMessages(
+        recentMessages: [Message],
+        existingConversationMemory: String?,
+        existingServerMemory: String?,
+        existingGlobalMemory: String?
+    ) -> [[String: Any]] {
         // 只取最近 ~10 条 user/assistant/command 消息，截断 content
         let sample = recentMessages
             .filter { $0.role == .user || $0.role == .assistant || $0.role == .command }
@@ -79,33 +120,9 @@ nonisolated struct AIAuxiliaryService: @unchecked Sendable {
         if !openAIMessages.contains(where: { ($0["role"] as? String) == "user" }) {
             openAIMessages.append(["role": "user", "content": "Extract memories from this conversation."])
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        config.strategy.setAuthHeaders(on: &request, apiKey: config.apiKey)
-        request.timeoutInterval = 30
-
-        request.httpBody = try config.strategy.buildNonStreamingRequestBody(
-            messages: openAIMessages,
-            model: config.modelName,
-            maxTokens: 300,
-            temperature: 0.3,
-            reasoningEffort: "none"
-        )
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw config.strategy.parseError(data: data, statusCode: statusCode)
-        }
-
-        let content = try config.strategy.parseNonStreamingContent(from: data)
-        return Self.parseMemorySummary(from: content)
+        return openAIMessages
     }
 
-    // MARK: - Static Helpers
 
     /// 构建现有记忆的提示块。
     static func buildExistingMemoryBlock(conversation: String?, server: String?, global: String?) -> String {
