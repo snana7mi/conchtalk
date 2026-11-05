@@ -50,6 +50,23 @@
         }
       }
     },
+    "Apple Private Cloud Compute is unavailable on this device right now, so ConchTalk uses your custom endpoint. Your choice is kept and Apple Private Cloud Compute is used again when it becomes available." : {
+      "comment" : "Settings footer when the saved Apple provider is unavailable and the custom endpoint is used instead.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在このデバイスではApple Private Cloud Computeを利用できないため、ConchTalkはカスタムエンドポイントを使用します。選択内容は保持され、利用可能になるとApple Private Cloud Computeが再び使用されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此设备当前无法使用 Apple 私有云计算，因此 ConchTalk 将使用你的自定义端点。你的选择会被保留，私有云计算恢复可用后将重新使用。"
+          }
+        }
+      }
+    },
     "Approaching Limit" : {
       "comment" : "Private Cloud Compute daily usage is close to the limit.",
       "localizations" : {
@@ -284,6 +301,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请求由私有云计算上的 Apple 基础模型处理，无需 API 密钥。每人有每日使用额度，iCloud+ 可提高额度。"
+          }
+        }
+      }
+    },
+    "Temporarily Unavailable" : {
+      "comment" : "Short reason: Private Cloud Compute is temporarily unavailable.",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一時的に利用不可"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂时不可用"
           }
         }
       }

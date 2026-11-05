@@ -20,6 +20,8 @@ struct SettingsView: View {
     /// AI 服务来源（自有端点 / Apple PCC）。
     @State private var provider: AIProviderKind
     @State private var savedProvider: AIProviderKind
+    /// Apple PCC 可用性（可观察，系统状态变化时刷新）。
+    @State private var pccProbe = PCCAvailabilityProbe()
     @State private var webSearchEnabled: Bool
     @State private var webSearchProvider: WebSearchProvider
     @State private var webSearchAPIKeys: [WebSearchProvider: String]
@@ -71,7 +73,7 @@ struct SettingsView: View {
         self.healthModel = healthModel
 
         let settings = AISettings.load()
-        let provider = Self.supportedProvider(AIProviderSettings.load())
+        let provider = AIProviderSettings.load()
         _provider = State(initialValue: provider)
         _savedProvider = State(initialValue: provider)
         let webSearchSettings = WebSearchSettings.load()
@@ -281,32 +283,67 @@ struct SettingsView: View {
         }
     }
 
-    /// 当前系统可选的服务来源：Apple PCC 需要 iOS 27+。
-    private static var availableProviders: [AIProviderKind] {
-        if #available(iOS 27.0, macOS 27.0, *) { return AIProviderKind.allCases }
-        return [.customEndpoint]
+    /// 实际生效的服务来源：保存为 Apple 但 PCC 不可用（或 iOS 26）时为自有端点；保存值不变。
+    private var effectiveProvider: AIProviderKind {
+        AIProviderSettings.effectiveProvider(
+            saved: provider,
+            isPCCSupportedOS: pccProbe.isSupportedOS,
+            pccUnavailableReason: pccProbe.unavailableReason
+        )
     }
 
-    /// 旧系统上忽略已保存的 PCC 选择，界面与路由保持一致。
-    private static func supportedProvider(_ kind: AIProviderKind) -> AIProviderKind {
-        availableProviders.contains(kind) ? kind : .customEndpoint
+    /// 已选择 Apple 但当前不可用时的原因（用于提示）。
+    private var pccFallbackReason: PCCFailure? {
+        guard provider == .applePrivateCloudCompute, pccProbe.isSupportedOS else { return nil }
+        return pccProbe.unavailableReason
+    }
+
+    /// Picker 显示生效来源；用户主动选择时才改写保存值。
+    private var providerSelection: Binding<AIProviderKind> {
+        Binding(
+            get: { effectiveProvider },
+            set: { provider = $0 }
+        )
     }
 
     /// AI 服务：选择 Apple Private Cloud Compute 或用户自有端点。
     private var aiServiceSection: some View {
         Section {
-            if Self.availableProviders.count > 1 {
+            // iOS 26 不支持 PCC：完全隐藏选择器。
+            if pccProbe.isSupportedOS {
                 Picker(
                     String(localized: "Provider", bundle: LanguageSettings.currentBundle),
-                    selection: $provider
+                    selection: providerSelection
                 ) {
-                    ForEach(Self.availableProviders, id: \.self) { kind in
-                        Label(kind.displayName, systemImage: kind.systemImage).tag(kind)
+                    Label(
+                        AIProviderKind.customEndpoint.displayName,
+                        systemImage: AIProviderKind.customEndpoint.systemImage
+                    )
+                    .tag(AIProviderKind.customEndpoint)
+
+                    // PCC 不可用时保留选项但置灰、不可选，并以副标题说明原因。
+                    let unavailable = pccProbe.unavailableReason
+                    Label {
+                        Text(AIProviderKind.applePrivateCloudCompute.displayName)
+                        if let unavailable {
+                            Text(unavailable.shortReason)
+                        }
+                    } icon: {
+                        Image(systemName: AIProviderKind.applePrivateCloudCompute.systemImage)
                     }
+                    .tag(AIProviderKind.applePrivateCloudCompute)
+                    .disabled(unavailable != nil)
                 }
             }
 
-            if provider == .applePrivateCloudCompute {
+            if let reason = pccFallbackReason {
+                LabeledContent(AIProviderKind.applePrivateCloudCompute.displayName) {
+                    Label(reason.shortReason, systemImage: "exclamationmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if effectiveProvider == .applePrivateCloudCompute {
                 if #available(iOS 27.0, macOS 27.0, *) {
                     ApplePCCStatusView()
                 }
@@ -317,10 +354,20 @@ struct SettingsView: View {
         } header: {
             Text(String(localized: "AI Service", bundle: LanguageSettings.currentBundle))
         } footer: {
-            if provider == .applePrivateCloudCompute {
+            if effectiveProvider == .applePrivateCloudCompute {
                 applePCCFooter
             } else {
-                customEndpointFooter
+                VStack(alignment: .leading, spacing: 4) {
+                    if pccFallbackReason != nil {
+                        Text(
+                            String(
+                                localized: "Apple Private Cloud Compute is unavailable on this device right now, so ConchTalk uses your custom endpoint. Your choice is kept and Apple Private Cloud Compute is used again when it becomes available.",
+                                bundle: LanguageSettings.currentBundle
+                            )
+                        )
+                    }
+                    customEndpointFooter
+                }
             }
         }
     }

@@ -48,11 +48,40 @@ nonisolated enum AIProviderSettings {
         defaults.set(kind.rawValue, forKey: providerKey)
     }
 
-    /// 当前系统上 PCC 是否会被实际选用（用户选择了 PCC 且系统为 iOS 27+）。
-    static func isPCCSelected(defaults: UserDefaults = .standard) -> Bool {
-        guard load(defaults: defaults) == .applePrivateCloudCompute else { return false }
+    /// 当前系统是否支持 PCC（iOS 27+）。iOS 26 上 Apple 选项完全隐藏。
+    static var isPCCSupportedOS: Bool {
         if #available(iOS 27.0, macOS 27.0, *) { return true }
         return false
+    }
+
+    /// 用户保存的选择为 PCC 且系统支持（不考虑当前可用性）；路由据此决定是否先尝试 PCC，
+    /// 不可用时由 `RoutingAIService` 回退到自有端点或把原因展示给用户。
+    static func isPCCSelected(defaults: UserDefaults = .standard) -> Bool {
+        load(defaults: defaults) == .applePrivateCloudCompute && isPCCSupportedOS
+    }
+
+    /// 实际生效的服务来源：保存为 PCC 但系统不支持或 PCC 当前不可用时，生效为自有端点。
+    /// 保存值本身不被改写，PCC 恢复可用后自动重新生效。
+    static func effectiveProvider(
+        saved: AIProviderKind,
+        isPCCSupportedOS: Bool,
+        pccUnavailableReason: PCCFailure?
+    ) -> AIProviderKind {
+        guard saved == .applePrivateCloudCompute, isPCCSupportedOS, pccUnavailableReason == nil else {
+            return .customEndpoint
+        }
+        return .applePrivateCloudCompute
+    }
+
+    /// 读取保存值与系统 PCC 可用性，得到当前生效的服务来源。
+    static func loadEffectiveProvider(defaults: UserDefaults = .standard) -> AIProviderKind {
+        let saved = load(defaults: defaults)
+        guard saved == .applePrivateCloudCompute else { return saved }
+        return effectiveProvider(
+            saved: saved,
+            isPCCSupportedOS: isPCCSupportedOS,
+            pccUnavailableReason: PCCAvailabilityProbe.currentUnavailableReason()
+        )
     }
 
     /// 最近一次从系统读到的 PCC 上下文窗口。

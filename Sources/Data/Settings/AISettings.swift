@@ -103,8 +103,8 @@ nonisolated struct AISettings {
     /// 只读取上下文窗口相关设置，不触碰 Keychain 或执行旧凭据迁移。
     /// 已知模型（Claude）时按模型窗口封顶，见 `effectiveMaxContextTokens`。
     static func loadMaxContextTokens(defaults: UserDefaults = .standard) -> Int {
-        // 选用 Apple PCC 时按其窗口预算（回退到自有端点时同样保守地使用较小窗口）。
-        if AIProviderSettings.isPCCSelected(defaults: defaults) {
+        // 生效来源为 Apple PCC 时按其窗口预算；PCC 不可用时生效为自有端点，使用用户设置。
+        if AIProviderSettings.loadEffectiveProvider(defaults: defaults) == .applePrivateCloudCompute {
             return AIProviderSettings.pccContextBudget(
                 contextSize: AIProviderSettings.cachedPCCContextSize(defaults: defaults)
             )

@@ -94,11 +94,29 @@ struct AIProviderSettingsTests {
 
         AIProviderSettings.save(.applePrivateCloudCompute, defaults: defaults)
         AIProviderSettings.storePCCContextSize(20_000, defaults: defaults)
-        if #available(iOS 27.0, macOS 27.0, *) {
-            #expect(AISettings.loadMaxContextTokens(defaults: defaults) == 20_000 - AIProviderSettings.pccOutputReserve)
-        } else {
-            #expect(AISettings.loadMaxContextTokens(defaults: defaults) == 128_000)
-        }
+        // 生效来源取决于本机 PCC 可用性（模拟器上通常不可用 → 自有端点预算）。
+        let pccEffective = AIProviderSettings.isPCCSupportedOS && PCCAvailabilityProbe.currentUnavailableReason() == nil
+        let expected = pccEffective ? 20_000 - AIProviderSettings.pccOutputReserve : 128_000
+        #expect(AISettings.loadMaxContextTokens(defaults: defaults) == expected)
+        // 保存值不因不可用而被改写。
+        #expect(AIProviderSettings.load(defaults: defaults) == .applePrivateCloudCompute)
+    }
+
+    @Test("生效来源：PCC 不可用或系统不支持时为自有端点")
+    func effectiveProvider() {
+        let pcc = AIProviderKind.applePrivateCloudCompute
+        #expect(AIProviderSettings.effectiveProvider(saved: pcc, isPCCSupportedOS: true, pccUnavailableReason: nil) == pcc)
+        #expect(AIProviderSettings.effectiveProvider(saved: pcc, isPCCSupportedOS: true, pccUnavailableReason: .deviceNotEligible) == .customEndpoint)
+        #expect(AIProviderSettings.effectiveProvider(saved: pcc, isPCCSupportedOS: true, pccUnavailableReason: .systemNotReady) == .customEndpoint)
+        #expect(AIProviderSettings.effectiveProvider(saved: pcc, isPCCSupportedOS: false, pccUnavailableReason: nil) == .customEndpoint)
+        #expect(AIProviderSettings.effectiveProvider(saved: .customEndpoint, isPCCSupportedOS: true, pccUnavailableReason: nil) == .customEndpoint)
+    }
+
+    @Test("不可用原因有简短的本地化文案")
+    func shortReasons() {
+        let reasons: [PCCFailure] = [.deviceNotEligible, .systemNotReady, .quotaLimitReached(resetDate: nil), .networkFailure, .serviceUnavailable]
+        for reason in reasons { #expect(!reason.shortReason.isEmpty) }
+        #expect(PCCFailure.deviceNotEligible.shortReason != PCCFailure.systemNotReady.shortReason)
     }
 
     @Test("自有端点三要素齐全才视为已配置")
